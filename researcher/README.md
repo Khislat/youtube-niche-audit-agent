@@ -1,6 +1,6 @@
-# Tadqiqotchi — Faza 1
+# Tadqiqotchi — Faza 1 / 1.2
 
-Bitta niche uchun YouTube Data API orqali kanallarni yig'adi, raqamlarni kod bilan hisoblaydi, SQLite'ga yozadi va CSV chiqaradi. Claude, Notion va Telegram keyingi fazalar.
+YouTube Data API orqali niche kanallarini yig'adi, outlier'larni hisoblaydi, AI/brend belgilarini va takliflarni kod bilan chiqaradi. Claude, Notion va Telegram keyingi fazalar.
 
 ## O'rnatish
 
@@ -12,37 +12,54 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-`.env` ichiga `YT_API_KEY` yozing. Boshqa kalitlar Faza 1 da ishlatilmaydi. `.env` gitga kirmaydi.
+`.env` ichiga `YT_API_KEY` yozing. `.env` gitga kirmaydi.
 
 ## Ishga tushirish
+
+Bitta niche:
 
 ```bash
 python main.py "cozy fantasy ambience" --no-claude
 ```
 
-Foydali bayroqlar: `--days 180`, `--max-age 365`, `--min-avg 5000`, `--min-median 3000`, `--min-ratio 0.15`, `--pages 1`, `--region US`, `--refresh`.
+Ko'p niche:
 
-Tugatilgan audit qayta ishga tushirilsa, dastur `oldin tekshirilgan` deb to'xtaydi. Qayta yig'ish uchun `--refresh`. Kvota tugab, natija chala saqlangan bo'lsa, keyingi ishga tushirish to'silmaydi.
+```bash
+python main.py --file niches.txt --no-claude --suggest
+```
+
+`niches.txt`: har qatorda bitta niche. Bo'sh qatorlar va `#` bilan boshlangan qatorlar o'tkaziladi.
+
+Foydali bayroqlar: `--days 180`, `--max-age 365`, `--min-avg 5000`, `--min-median 3000`, `--min-ratio 0.15`, `--pages 1`, `--region US`, `--refresh`, `--max-quota 8000`, `--suggest`, `--auto-suggest N`, `--min-channels 2`.
+
+`--max-quota`: shu ishga tushirishda jami kvota limiti. Keyingi niche boshlanishidan oldin `joriy + 250` limitdan oshsa, to'xtaydi (oldin saqlangan natijalar qoladi).
+
+`--suggest`: outlier top-videolar sarlavha/teglaridan taklif CSV. `--auto-suggest N`: eng yaxshi N ta iborani shu navbatda audit qiladi (faqat 1 daraja chuqurlik).
+
+Tugatilgan audit `--refresh`siz o'tkazib yuboriladi. Kvota tugasa, chala natija saqlanadi.
 
 ## Natija
 
-- Konsolda qisqa jadval va `Sarflangan kvota`.
-- `output/<niche>_<sana>.csv` — outlier kanallar tepada. Sana kompyuterning mahalliy sanasi.
-- `data/researcher.db` — `audits`, `channels`, `videos`, `expansions`.
+Har niche uchun:
 
-## Hisoblash
+- `output/<niche>_<sana>.csv` — kanallar (outlier tepada). Tepada izoh: **belgi yo'qligi AI yoki brend ishlatilmaganini isbotlamaydi**; ko'p kanallar buni yozmaydi.
+- `output/<niche>_<sana>_top_videos.csv` — har outlier kanalning eng ko'p ko'rilgan 5 ta videosi.
+- `output/<niche>_<sana>_suggestions.csv` — `--suggest` bilan.
+- `data/researcher.db`
 
-Qidiruv ikki marta ketadi: `viewCount` va `relevance`. Takror video ID'lar tushadi. Har kanal `found_by` oladi: `views`, `relevance` yoki `both`. Har bir `search.list` 100 kvota.
+Ko'p niche tugagach: `output/compare_<sana>.csv` (relevance outlier % bo'yicha tartib).
 
-Kanal yoshi, video soni, jami ko'rish, o'rtacha ko'rish, kunlik ko'rish va obunachi `channels.list` dan. Oxirgi 50 ta yuklama namunasi median, top ulush, o'rtacha davomiylik va haftalik yuklashni beradi. `recent10_median_views` shu namunaning eng yangi 10 tasidan (kam bo'lsa, boridan).
+## `keywords.json`
 
-Yuklama ro'yxati faqat `yosh <= max_age` va `o'rtacha >= min_avg` bo'lgan kanallarga so'raladi. Outlier bo'lishi uchun yosh, o'rtacha, median (`>= 3000`), `median / o'rtacha >= 0.15` va top ulush (`<= 0.6`) kerak. O'rtacha 0 bo'lsa nisbat hisoblanmaydi va kanal outlier emas. Yashirin obunachi `None`.
+AI va brend kalit so'zlari hamda taklif uchun stop-so'zlar shu faylda. Matn skaneri faqat **butun so'z/ibora** (`\b`) bo'yicha qidiradi. `"ai"` alohida ro'yxatda yo'q (juda noaniq). Faylni tahrirlang va qayta ishga tushiring — qo'shimcha kutubxona kerak emas.
 
-`Outlier ulushi (faqat relevance)` — relevance qidiruvi qaytargan kanallar (`relevance` va `both`) ichidagi outlier ulushi. Bu kanallar 10 tadan kam bo'lsa, konsolda `tanlama kichik` chiqadi.
+## Hisoblash (qisqa)
 
-`uploads_per_week` — namuna soni, eng eski va eng yangi yuklama orasidagi haftalar soniga bo'lingan. Bitta yuklama yoki bir xil vaqtdagi yuklamalar uchun qiymat yo'q. Kanal yoshi 0 bo'lsa, kunlik ko'rish hisoblanmaydi.
+Qidiruv: `viewCount` + `relevance`. Outlier qoidalari: yosh, o'rtacha, median (`>= 3000`), median/o'rtacha (`>= 0.15`), top ulush (`<= 0.6`).
 
-`channels_analyzed` — qidiruvdan chiqqan barcha kanallar. `new_channels` — yoshi `max_age` dan oshmaganlar.
+Kanal `ai_flag_share` / `brand_flag_share`: oxirgi 50 yuklama ichida kamida bitta AI yoki brend termini bor videolar ulushi.
+
+Bir niche uchun kvota odatda ~230–250 (qo'shimcha `snippet` maydonlari qo'shimcha kvota olmaydi).
 
 ## Test
 
@@ -50,8 +67,6 @@ Yuklama ro'yxati faqat `yosh <= max_age` va `o'rtacha >= min_avg` bo'lgan kanall
 pytest
 ```
 
-Jonli YouTube kalitisiz ham o'tadi: API javoblari mock qilinadi.
-
 ## Hali yo'q
 
-Faza 2 (niche kengaytirish, sarlavha/thumbnail, ball) va Faza 3 (Notion, Telegram) qurilmagan. `--no-claude` siz ishga tushirilsa ham hozir faqat yig'ish bajariladi.
+Claude tahlili, thumbnail/rasm tahlili, ball, Notion, Telegram, autocomplete/scraping.

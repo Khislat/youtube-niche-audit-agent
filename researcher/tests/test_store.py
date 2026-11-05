@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import csv
+import io
 import sqlite3
 
 from store import find_audit, init_db, recent_audits, save_audit, write_channels_csv
@@ -95,6 +96,36 @@ def test_save_find_and_recent(tmp_path: Path):
     assert video_count == 1
 
 
+def test_old_videos_table_migration(tmp_path: Path):
+    db_path = tmp_path / "old.db"
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        """
+        CREATE TABLE videos (
+            audit_id INTEGER NOT NULL,
+            channel_id TEXT NOT NULL,
+            video_id TEXT NOT NULL,
+            title TEXT,
+            views INTEGER,
+            duration_min REAL,
+            published_at TEXT,
+            thumbnail_url TEXT,
+            PRIMARY KEY (audit_id, video_id)
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+    init_db(db_path)
+    connection = sqlite3.connect(db_path)
+    try:
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(videos)")]
+    finally:
+        connection.close()
+    assert "description_snippet" in columns
+    assert "top_rank" in columns
+
+
 def test_csv_puts_outliers_first(tmp_path: Path):
     path = tmp_path / "out.csv"
     write_channels_csv(
@@ -104,8 +135,11 @@ def test_csv_puts_outliers_first(tmp_path: Path):
             _channel("top", "Bright", outlier=True, views_per_day=5),
         ],
     )
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.DictReader(handle))
+    text = path.read_text(encoding="utf-8-sig")
+    lines = text.splitlines()
+    if lines and lines[0].startswith("#"):
+        text = "\n".join(lines[1:])
+    rows = list(csv.DictReader(io.StringIO(text)))
     assert rows[0]["Kanal"] == "Bright"
     assert rows[0]["Outlier"] == "ha"
     assert rows[1]["Kanal"] == "Quiet"

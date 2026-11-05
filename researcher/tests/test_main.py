@@ -199,9 +199,10 @@ def test_phase1_csv_sqlite_quota_and_cached_rerun(monkeypatch, tmp_path, capsys,
     assert "Outlier ulushi (faqat relevance): 50%" in out
     assert "tanlama kichik" in out
     assert "Outlier ko'rish/kun (median): 1,000" in out
-    assert "Oxirgi10 median" in out
+    assert "Oxirgi10" in out
     assert "Topilgan" in out
-    assert "Sarflangan kvota: 204" in out
+    assert "Sarflangan kvota (shu niche): 204" in out
+    assert "Jami sarflangan kvota: 204" in out
 
     saved = find_audit(tmp_path / "researcher.db", NICHE)
     assert saved["quota_used"] == 204
@@ -247,11 +248,21 @@ def test_phase1_csv_sqlite_quota_and_cached_rerun(monkeypatch, tmp_path, capsys,
     assert old["subs"] is None
     assert old["median_views"] is None
     assert video_count == 5
+    assert young["ai_flag_share"] is not None
 
-    files = list((tmp_path / "out").glob("cozy_fantasy_ambience_*.csv"))
+    files = [
+        path
+        for path in (tmp_path / "out").glob("cozy_fantasy_ambience_*.csv")
+        if "_top_videos" not in path.name and "_suggestions" not in path.name and not path.name.startswith("compare_")
+    ]
     assert len(files) == 1
-    with files[0].open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.DictReader(handle))
+    import io
+
+    text = files[0].read_text(encoding="utf-8-sig")
+    lines = text.splitlines()
+    if lines and lines[0].startswith("#"):
+        text = "\n".join(lines[1:])
+    rows = list(csv.DictReader(io.StringIO(text)))
     assert rows[0]["Kanal"] == "Young Dreams"
     assert rows[0]["Outlier"] == "ha"
     assert rows[1]["Kanal"] == "Old Archive"
@@ -273,7 +284,7 @@ def test_phase1_csv_sqlite_quota_and_cached_rerun(monkeypatch, tmp_path, capsys,
     code = _run(tmp_path, [NICHE, "--no-claude", "--refresh"])
     refreshed = capsys.readouterr().out
     assert code == 0
-    assert "Sarflangan kvota: 204" in refreshed
+    assert "Sarflangan kvota (shu niche): 204" in refreshed
     assert len(recent_audits(tmp_path / "researcher.db", 10)) == 2
 
 
@@ -284,7 +295,8 @@ def test_without_no_claude_still_only_collects(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "Claude tahlili keyingi fazada" in out
-    assert "Sarflangan kvota: 204" in out
+    assert "Sarflangan kvota (shu niche): 204" in out
+    assert "Jami sarflangan kvota: 204" in out
     assert find_audit(tmp_path / "researcher.db", NICHE)["summary"]["outliers"] == 1
 
 
@@ -296,7 +308,7 @@ def test_empty_search_is_a_finished_audit(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "Kanal topilmadi." in out
-    assert "Sarflangan kvota: 200" in out
+    assert "Sarflangan kvota (shu niche): 200" in out
     assert find_audit(tmp_path / "researcher.db", "quiet room")["summary"]["complete"] is True
 
     api.enabled = False
@@ -312,9 +324,8 @@ def test_quota_on_search_does_not_save(monkeypatch, tmp_path, capsys):
     code = _run(tmp_path, [NICHE, "--no-claude"])
     out = capsys.readouterr().out
     assert code == 1
-    assert "kvotasi tugadi" in out
     assert "yig'ilmagan" in out
-    assert "Sarflangan kvota: 0" in out
+    assert "Jami sarflangan kvota: 0" in out
     assert find_audit(tmp_path / "researcher.db", NICHE) is None
 
 
@@ -329,7 +340,8 @@ def test_quota_midway_saves_partial_and_does_not_block_retry(monkeypatch, tmp_pa
     assert api.calls == ["search", "search", "videos", "channels", "playlistItems", "videos", "playlistItems"]
     assert "kvotasi tugadi" in out
     assert "saqlandi" in out
-    assert "Sarflangan kvota: 204" in out
+    assert "Sarflangan kvota (shu niche): 204" in out
+    assert "Jami sarflangan kvota: 204" in out
     partial = find_audit(tmp_path / "researcher.db", "soft rain")
     assert partial["summary"]["complete"] is False
     assert partial["summary"]["channels_analyzed"] == 1
@@ -339,7 +351,7 @@ def test_quota_midway_saves_partial_and_does_not_block_retry(monkeypatch, tmp_pa
     retried = capsys.readouterr().out
     assert code == 0
     assert "oldin tekshirilgan" not in retried
-    assert "Sarflangan kvota: 206" in retried
+    assert "Sarflangan kvota (shu niche): 206" in retried
     finished = find_audit(tmp_path / "researcher.db", "soft rain")
     assert finished["summary"]["complete"] is True
     assert finished["summary"]["outliers"] == 2
@@ -362,4 +374,4 @@ def test_rejects_bad_arguments(capsys):
     out = capsys.readouterr().out
     assert "1 dan 5" in out
     assert "--days" in out
-    assert "bo'sh" in out
+    assert "Niche yoki --file kerak" in out

@@ -187,6 +187,8 @@ def _normalize_video(item: dict) -> dict | None:
     stats = item.get("statistics") or {}
     details = item.get("contentDetails") or {}
     views = _int_or_none(stats.get("viewCount"))
+    description = snippet.get("description") or ""
+    tags = snippet.get("tags") or []
     return {
         "video_id": video_id,
         "channel_id": snippet.get("channelId") or "",
@@ -195,6 +197,8 @@ def _normalize_video(item: dict) -> dict | None:
         "views": 0 if views is None else views,
         "duration_min": iso8601_duration_minutes(details.get("duration")),
         "thumbnail_url": _thumbnail_url(snippet),
+        "description_snippet": description[:300],
+        "tags": list(tags) if isinstance(tags, list) else [],
     }
 
 

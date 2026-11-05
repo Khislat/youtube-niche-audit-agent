@@ -26,6 +26,7 @@ from metrics import (
     median,
     needs_upload_sample,
     parse_datetime,
+    pick_top_videos,
     top_video_share,
     uploads_per_week,
     views_per_day,
@@ -122,6 +123,20 @@ def test_views_per_day_does_not_divide_by_zero():
     assert views_per_day(100_000, 100) == 1000
     assert views_per_day(100_000, 0) is None
     assert views_per_day(100_000, None) is None
+
+
+def test_pick_top_videos_orders_by_views_and_caps():
+    uploads = [
+        {"views": 10, "video_id": "a"},
+        {"views": 100, "video_id": "b"},
+        {"views": 50, "video_id": "c"},
+        {"views": 200, "video_id": "d"},
+        {"views": 150, "video_id": "e"},
+        {"views": 120, "video_id": "f"},
+    ]
+    top = pick_top_videos(uploads, 5)
+    assert [video["video_id"] for video in top] == ["d", "e", "f", "b", "c"]
+    assert [video["video_id"] for video in pick_top_videos(uploads[:2], 5)] == ["b", "a"]
 
 
 def test_median_odd_and_even():

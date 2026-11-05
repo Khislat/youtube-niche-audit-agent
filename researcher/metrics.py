@@ -241,6 +241,28 @@ def compute_channel_metrics(
     }
 
 
+def pick_top_videos(uploads: list[dict], n: int = 5) -> list[dict]:
+    """Highest-view uploads from a channel sample."""
+    if not uploads:
+        return []
+    ordered = sorted(uploads, key=lambda video: float(video.get("views") or 0), reverse=True)
+    return ordered[:n]
+
+
+def outlier_flag_rates(channels: list[dict]) -> dict:
+    """Among outlier channels, share with any AI or brand flag in the upload sample."""
+    outliers = [channel for channel in channels if channel.get("is_outlier")]
+    if not outliers:
+        return {"outlier_ai_flag_pct": None, "outlier_brand_flag_pct": None}
+    ai_hit = sum(1 for channel in outliers if (channel.get("ai_flag_share") or 0) > 0)
+    brand_hit = sum(1 for channel in outliers if (channel.get("brand_flag_share") or 0) > 0)
+    total = len(outliers)
+    return {
+        "outlier_ai_flag_pct": ai_hit / total,
+        "outlier_brand_flag_pct": brand_hit / total,
+    }
+
+
 def compute_niche_metrics(channels: list[dict], *, max_age: float) -> dict:
     """Niche rollup. `channels_analyzed` is every channel returned by the search."""
     outliers = [channel for channel in channels if channel.get("is_outlier")]
@@ -286,4 +308,5 @@ def compute_niche_metrics(channels: list[dict], *, max_age: float) -> dict:
                 if channel.get("uploads_per_week") is not None
             ]
         ),
+        **outlier_flag_rates(channels),
     }
