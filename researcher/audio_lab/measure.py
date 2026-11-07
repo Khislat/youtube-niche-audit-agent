@@ -125,6 +125,7 @@ def _measure(y: np.ndarray, sr: int, info: dict, loudness: dict, stereo: dict) -
             "estimate",
             "Eng sokin 5% kadrlarning o'rtacha darajasi. Signal ichidagi sokin joyni shovqin deb o'qishi mumkin.",
         ),
+        "artifacts": _artifact_metrics(y, sr, spectrum),
         "timelines_1s": metric(
             _timeline_1s(y, sr, spectrum, onset_times, short_term, rms_1s),
             "mixed",
@@ -588,6 +589,165 @@ def _stereo(path: Path, channels: int, start_s: float | None, end_s: float | Non
         "width": metric(width, "ratio", "measured", width_note),
         "channel_correlation": metric(corr, "correlation", "measured", corr_note),
     }
+
+
+def _artifact_metrics(y: np.ndarray, sr: int, spectrum: dict) -> dict:
+    """Noise and roughness measures. They do not replace the older noise-floor estimate."""
+    floor_db, quiet_cols = _quiet_frame_level(y, sr, spectrum)
+    quiet_power = _mean_columns(spectrum["power"], quiet_cols)
+    full_power = _mean_columns(spectrum["power"], None)
+    harmonic_share, residual_share = _hpss_shares(y)
+    flux_mean, flux_std = _flux_stats(spectrum["magnitude"])
+    return {
+        "noise_floor_db": metric(
+            floor_db,
+            "dBFS",
+            "measured",
+            "Eng sokin 10% kadrlarning RMS darajasi.",
+        ),
+        "quiet_spectrum": metric(
+            _third_octave_db(quiet_power, spectrum["freqs"], sr),
+            "dB",
+            "measured",
+            "Sokin 10% kadrlarning o'rtacha spektri, 1/3-oktava, STFT quvvati.",
+        ),
+        "flatness_2_8khz": metric(
+            _band_flatness(spectrum["magnitude"], spectrum["freqs"], sr),
+            "0-1",
+            "measured",
+            "2–8 kHz oralig'idagi spektr tekisligining o'rtachasi. Yuqori — shovqinsimon.",
+        ),
+        "hpss_harmonic_share": metric(
+            harmonic_share,
+            "0-1",
+            "proxy",
+            "librosa HPSS: garmonik energiya ulushi.",
+        ),
+        "hpss_residual_share": metric(
+            residual_share,
+            "0-1",
+            "proxy",
+            "librosa HPSS: qolgan (perkussiv) energiya ulushi.",
+        ),
+        "flux_mean": metric(
+            flux_mean,
+            "1",
+            "proxy",
+            "Normallangan spektrlar orasidagi o'zgarishning o'rtachasi.",
+        ),
+        "flux_std": metric(
+            flux_std,
+            "1",
+            "proxy",
+            "Shu spektr o'zgarishining standart og'ishi.",
+        ),
+        "ltas": metric(
+            _third_octave_db(full_power, spectrum["freqs"], sr),
+            "dB",
+            "measured",
+            "Butun parcha o'rtacha spektri, 1/3-oktava, STFT quvvati.",
+        ),
+    }
+
+
+def ltas_and_quiet(y: np.ndarray, sr: int) -> tuple[list, list]:
+    """Third-octave LTAS and the quiet-frame spectrum, same dB definition as analyze."""
+    spectrum = _spectrum(y, sr)
+    _floor, quiet_cols = _quiet_frame_level(y, sr, spectrum)
+    quiet = _third_octave_db(_mean_columns(spectrum["power"], quiet_cols), spectrum["freqs"], sr)
+    full = _third_octave_db(_mean_columns(spectrum["power"], None), spectrum["freqs"], sr)
+    return full, quiet
+
+
+def _quiet_frame_level(y: np.ndarray, sr: int, spectrum: dict) -> tuple[float | None, np.ndarray | None]:
+    frame = max(1, int(round(config.FRAME_S * sr)))
+    count = len(y) // frame
+    if count == 0 or spectrum["power"].size == 0:
+        return None, None
+    shaped = y[: count * frame].reshape(count, frame)
+    power = np.mean(shaped * shaped, axis=1)
+    n_quiet = max(1, int(math.ceil(count * config.ARTIFACT_QUIET_FRACTION)))
+    chosen = np.argsort(power)[:n_quiet]
+    quiet_power = power[chosen]
+    rms = float(np.sqrt(np.mean(quiet_power)))
+    floor_db = None if rms <= 0 else 20.0 * math.log10(rms)
+    times = librosa.frames_to_time(
+        np.arange(spectrum["power"].shape[1]), sr=sr, hop_length=config.HOP_LENGTH
+    )
+    sample_index = np.clip((times * sr).astype(int), 0, count * frame - 1)
+    frame_index = sample_index // frame
+    quiet_set = set(int(item) for item in chosen)
+    columns = np.array([int(item) in quiet_set for item in frame_index], dtype=bool)
+    if not np.any(columns):
+        columns = None
+    return floor_db, columns
+
+
+def _mean_columns(power: np.ndarray, columns: np.ndarray | None) -> np.ndarray:
+    if power.size == 0:
+        return np.zeros(0, dtype=np.float64)
+    if columns is None:
+        return np.mean(power, axis=1)
+    if not np.any(columns):
+        return np.mean(power, axis=1)
+    return np.mean(power[:, columns], axis=1)
+
+
+def _third_octave_db(power: np.ndarray, freqs: np.ndarray, sr: int) -> list[dict]:
+    if power.size == 0 or freqs.size == 0 or sr <= 0:
+        return []
+    nyquist = sr / 2.0
+    k_min = math.ceil(3.0 * math.log2(20.0 / 1000.0))
+    k_max = math.floor(3.0 * math.log2(max(nyquist, 20.0) / 1000.0))
+    rows = []
+    for k in range(k_min, k_max + 1):
+        center = 1000.0 * (2.0 ** (k / 3.0))
+        if center >= nyquist:
+            continue
+        low = center / (2.0 ** (1.0 / 6.0))
+        high = center * (2.0 ** (1.0 / 6.0))
+        mask = (freqs >= low) & (freqs < high) & (freqs < nyquist)
+        if not np.any(mask):
+            continue
+        mean_power = float(np.mean(power[mask]))
+        db = None if mean_power <= 0 else 10.0 * math.log10(mean_power)
+        rows.append({"center_hz": center, "db": db})
+    return rows
+
+
+def _band_flatness(magnitude: np.ndarray, freqs: np.ndarray, sr: int) -> float | None:
+    high = min(config.ARTIFACT_FLATNESS_HIGH_HZ, sr / 2.0)
+    mask = (freqs >= config.ARTIFACT_FLATNESS_LOW_HZ) & (freqs < high)
+    if int(np.sum(mask)) < 2 or magnitude.shape[1] == 0:
+        return None
+    flat = librosa.feature.spectral_flatness(S=magnitude[mask, :])[0]
+    return _finite_stat(flat, np.mean)
+
+
+def _hpss_shares(y: np.ndarray) -> tuple[float | None, float | None]:
+    if y.size < config.N_FFT:
+        return None, None
+    harmonic, residual = librosa.effects.hpss(y)
+    harmonic_energy = float(np.dot(harmonic, harmonic))
+    residual_energy = float(np.dot(residual, residual))
+    total = harmonic_energy + residual_energy
+    if total <= 0:
+        return None, None
+    return harmonic_energy / total, residual_energy / total
+
+
+def _flux_stats(magnitude: np.ndarray) -> tuple[float | None, float | None]:
+    if magnitude.ndim != 2 or magnitude.shape[1] < 2:
+        return None, None
+    totals = np.sum(magnitude, axis=0, keepdims=True)
+    totals[totals < 1e-12] = 1.0
+    normed = magnitude / totals
+    delta = np.diff(normed, axis=1)
+    flux = np.sqrt(np.sum(delta * delta, axis=0))
+    flux = flux[np.isfinite(flux)]
+    if flux.size == 0:
+        return None, None
+    return float(np.mean(flux)), float(np.std(flux))
 
 
 def _noise_floor(frame_db: np.ndarray) -> float | None:

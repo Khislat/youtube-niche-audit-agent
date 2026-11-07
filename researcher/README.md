@@ -124,7 +124,10 @@ python audio_lab.py analyze --input mix.wav --segment --sr 44100
 python audio_lab.py analyze --input mix.wav --sample-times 5:00,15:00,25:00,40:00,55:00 --clip-len 240
 python audio_lab.py profile --dir papka --name uslub --per-track
 python audio_lab.py summarize --report output/audio/<papka>/report.json --out output/audio/<papka>/summary.md
+python audio_lab.py compare-spectra --files a.wav b.webm --clip 300 540 --out output/spectra.png
 ```
+
+`compare-spectra` har faylning uzoq muddatli o'rtacha spektrini (LTAS, 1/3-oktava) bitta grafikka qo'yadi va ikkinchi grafikda sokin 10% kadrlar spektrini chizadi. Fayllar bir xil dB o'qida, har biri o'z rangida. Hisob 44100 Hz da. 15 daqiqadan uzun fayl `--clip START END` siz olinmaydi; uzun miks uchun taxminan 240 s (4 daqiqa) bo'lak bering. Grafik `output/spectra.png` ga tushadi va gitga kirmaydi.
 
 `summarize` katta `report.json` dan 120 qatordan oshmaydigan `summary.md` yozadi. `--report` berilmasa `output/audio/` ichidagi eng yangi hisobot olinadi. Timeline va grafik nuqtalari kirmaydi. Parcha guruhlari silhouette emas, kosinus masofa `1.0` kesimi bilan olinadi va `[PROKSI, kichik tanlama]` deb belgilanadi.
 
@@ -157,9 +160,9 @@ O'lchangan natija, 4 soniyalik crossfade, `--min-track 90`, `k=2.6`. A va B turl
 
 | kind | Hisobotdagi belgi | Misollar |
 | --- | --- | --- |
-| measured | [O'LCHANGAN] | LUFS, LRA, true peak, RMS, dinamik diapazon, chastota bandlari, centroid, rolloff, flatness, pauza, stereo |
-| estimate | [TAXMINIY] | past-o'tkazish chegarasi, tempo, tonallik, shovqin pog'onasi, stemlar |
-| proxy | [PROKSI] | onset tezligi, IOI, takrorlanish |
+| measured | [O'LCHANGAN] | LUFS, LRA, true peak, RMS, dinamik diapazon, chastota bandlari, centroid, rolloff, flatness, pauza, stereo, sokin 10% RMS (`noise_floor_db`), 2–8 kHz tekislik, sokin spektr va LTAS |
+| estimate | [TAXMINIY] | past-o'tkazish chegarasi, tempo, tonallik, eski shovqin pog'onasi (`noise_floor_dbfs`, sokin 5%), stemlar |
+| proxy | [PROKSI] | onset tezligi, IOI, takrorlanish, HPSS garmonik/residual ulushi, spektr oqimi |
 | probabilistic | [EHTIMOLLIK] | Essentia janr, asbob, kayfiyat teglari |
 
 Har bir sonli metrikada `value`, `unit`, `kind`, `note` bor. `report.md` oxirida **Cheklovlar** bo'limi bor: tempo/tonallik ambientda ishonchsiz, stemlarda artefakt, teglar ehtimollik, tahlil "nega yoqadi"ga javob bermaydi.

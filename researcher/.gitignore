@@ -9,6 +9,7 @@ data/*.db
 data/audio_inputs/
 data/audio_models/
 output/*.csv
+output/*.png
 output/mixes/
 output/audio/**/summary.md
 output/audio/

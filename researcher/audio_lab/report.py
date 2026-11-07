@@ -64,6 +64,12 @@ ROWS = (
     ("stereo.width", "Stereo kenglik"),
     ("stereo.channel_correlation", "Kanallar korrelyatsiyasi"),
     ("noise_floor_dbfs", "Shovqin pog'onasi"),
+    ("artifacts.noise_floor_db", "Sokin 10% RMS"),
+    ("artifacts.flatness_2_8khz", "Tekislik 2–8 kHz"),
+    ("artifacts.hpss_harmonic_share", "HPSS garmonik ulush"),
+    ("artifacts.hpss_residual_share", "HPSS residual ulush"),
+    ("artifacts.flux_mean", "Spektr oqimi o'rtacha"),
+    ("artifacts.flux_std", "Spektr oqimi std"),
 )
 LIMITATIONS = """## Cheklovlar
 

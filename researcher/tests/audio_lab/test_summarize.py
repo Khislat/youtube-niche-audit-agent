@@ -84,6 +84,11 @@ def test_summary_fits_and_lists_columns_without_stems_or_tags(tmp_path):
         "tempo taxmin",
         "key taxmin",
         "repetition proksi",
+        "noise_floor_db o'lchov",
+        "flatness_2_8k o'lchov",
+        "hpss_h proksi",
+        "flux_mean proksi",
+        "flux_std proksi",
     ):
         assert column in text
     assert "ishonchsiz" in text

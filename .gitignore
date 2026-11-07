@@ -10,6 +10,7 @@ researcher/data/*.db
 researcher/data/audio_inputs/
 researcher/data/audio_models/
 researcher/output/*.csv
+researcher/output/*.png
 researcher/output/mixes/
 researcher/output/audio/**/summary.md
 researcher/output/audio/

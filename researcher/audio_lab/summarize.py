@@ -21,6 +21,12 @@ COMPARE = (
     ("eng uzun pauza", "pause.longest_pause_s"),
     ("onset/s", "onsets.onsets_per_sec"),
     ("repetition", "repetition.repetition_score"),
+    ("noise_floor", "artifacts.noise_floor_db"),
+    ("flatness 2-8 kHz", "artifacts.flatness_2_8khz"),
+    ("hpss garmonik", "artifacts.hpss_harmonic_share"),
+    ("hpss residual", "artifacts.hpss_residual_share"),
+    ("spektr oqimi", "artifacts.flux_mean"),
+    ("spektr oqimi std", "artifacts.flux_std"),
     *( (band, f"bands.share_pct.{band}") for band in BANDS ),
 )
 
@@ -124,12 +130,18 @@ def table_header() -> str:
         "tempo taxmin",
         "key taxmin",
         "repetition proksi",
+        "noise_floor_db o'lchov",
+        "flatness_2_8k o'lchov",
+        "hpss_h proksi",
+        "hpss_r proksi",
+        "flux_mean proksi",
+        "flux_std proksi",
     ]
     return "| " + " | ".join(names) + " |"
 
 
 def table_rule() -> str:
-    return "| " + " | ".join("---" for _ in range(17)) + " |"
+    return "| " + " | ".join("---" for _ in range(23)) + " |"
 
 
 def table_cells(row: dict) -> list[str]:
@@ -149,6 +161,12 @@ def table_cells(row: dict) -> list[str]:
         _reliable_text(metrics, "tempo", "tempo.bpm"),
         _reliable_text(metrics, "key", "key.label"),
         _plain(metrics, "repetition.repetition_score"),
+        _plain(metrics, "artifacts.noise_floor_db"),
+        _plain(metrics, "artifacts.flatness_2_8khz"),
+        _plain(metrics, "artifacts.hpss_harmonic_share"),
+        _plain(metrics, "artifacts.hpss_residual_share"),
+        _plain(metrics, "artifacts.flux_mean"),
+        _plain(metrics, "artifacts.flux_std"),
     ]
 
 
