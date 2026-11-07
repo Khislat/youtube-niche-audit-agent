@@ -121,6 +121,7 @@ Uzun miksni treklarga ajratish:
 ```bash
 python audio_lab.py segment --input mix.wav --expect-tracks 12-15 --min-track 90
 python audio_lab.py analyze --input mix.wav --segment --sr 44100
+python audio_lab.py analyze --input mix.wav --sample-times 5:00,15:00,25:00,40:00,55:00 --clip-len 240
 python audio_lab.py profile --dir papka --name uslub --per-track
 ```
 
@@ -130,11 +131,24 @@ Segmentatsiya o'zi 22050 Hz da ishlaydi. `--sr` faqat har trekning chastota va s
 
 Balandlik `ffmpeg ebur128` bilan o'lchanadi.
 
+Boshqa odamning musiqasini repo ildiziga qo'ymang. Alohida treklar `researcher/data/audio_inputs/<papka>/` ichida qoladi. Tayyor uzun miksni shu papkaga yoki repodan tashqaridagi yo'lga qo'yish ham mumkin. `wav`, `mp3`, `flac`, `m4a` va shu kabi audio gitignore da. `git add -f` bilan majburan qo'shmang.
+
 `--stems` va `--tags` default o'chiq. Bir xil fayl va parametrlar qayta hisoblanmaydi; `--refresh` majbur qiladi. Raqamlar 4 o'nli yaxlitlanadi.
 
-### Chegarani aniqlash cheklovlari
+### Chegara nomzodlari (ishonchsiz, tracklist yoki qo'lda tuzatish tavsiya etiladi)
 
-Qattiq kesish va 0.5 soniyadan uzun jimlik aniqroq topiladi. Crossfade va bir-biriga o'xshash tembrli treklarda chegara bir necha soniyaga surilishi yoki umuman tushib qolishi mumkin. Har chegarada `confidence` va `evidence` bor. Shubhali joyda `manual.csv` yoki tracklist matnidan foydalaning. Takror trek va `style_groups` proksi.
+`strength` chegaraning kuchini ko'rsatadi, to'g'riligini emas; A va B real mixlarda soxta chegaralar ham `high` bo'lgan.
+
+Qattiq kesish va 0.5 soniyadan uzun jimlik aniqroq topiladi. Crossfade va bir-biriga o'xshash tembrli treklarda chegara bir necha soniyaga surilishi yoki umuman tushib qolishi mumkin. Shubhali joyda `manual.csv` yoki tracklist matnidan foydalaning. Takror trek va `style_groups` proksi.
+
+O'lchangan natija, 4 soniyalik crossfade, `--min-track 90`, `k=2.6`. A va B turli treklardan yig'ilgan. B sozlamada ishlatilmagan.
+
+| Mix | ±3 s precision | ±3 s recall | ±5 s precision | ±5 s recall |
+| --- | --- | --- | --- | --- |
+| A (6 trek, ccMixter) | 0.50 | 0.80 | 0.50 | 0.80 |
+| B (4 trek, Finn Anderson) | 0.14 | 0.33 | 0.29 | 0.67 |
+
+`--sample-times` uzun fayldan ko'rsatilgan vaqtlarda `--clip-len` (default 240 s) parchalarni kesib, har birini alohida tahlil qiladi. Fayl oxiridan oshgan vaqt ogohlantirish bilan tashlanadi. Parchalar orasidagi feature masofa va `style_groups` proksi. `profile --per-track` har parchani bitta birlik sifatida oladi.
 
 ### Metrika turlari
 

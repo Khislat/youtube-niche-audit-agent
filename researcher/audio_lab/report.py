@@ -15,6 +15,14 @@ import numpy as np
 
 from audio_lab import config, io, measure, stems, store, tags
 
+STRENGTH_NOTE = (
+    "strength chegaraning kuchini ko'rsatadi, to'g'riligini emas; "
+    "A va B real mixlarda soxta chegaralar ham `high` bo'lgan."
+)
+BOUNDARY_TITLE = (
+    "Chegara nomzodlari (ishonchsiz, tracklist yoki qo'lda tuzatish tavsiya etiladi)"
+)
+
 BADGE = {
     "measured": "[O'LCHANGAN]",
     "estimate": "[TAXMINIY]",
@@ -91,6 +99,8 @@ def analyze_to_disk(
     export_segments: bool = False,
     manual_starts: list[float] | None = None,
     tracklist: list[dict] | None = None,
+    sample_times: list[float] | None = None,
+    clip_len_s: float | None = None,
 ) -> dict:
     path = Path(path)
     out = Path(out_dir or config.DEFAULT_OUT_DIR)
@@ -102,6 +112,18 @@ def analyze_to_disk(
         "stems": bool(stems),
         "tags": bool(tags),
     }
+    sampling = sample_times is not None
+    if sampling and clip is not None:
+        raise io.AudioLabError("--sample-times va --clip birga ishlamaydi.")
+    if sampling and segment:
+        raise io.AudioLabError("--sample-times va --segment birga ishlamaydi.")
+    if sampling:
+        if clip_len_s is None:
+            clip_len_s = 240.0
+        if clip_len_s <= 0:
+            raise io.AudioLabError("--clip-len musbat bo'lishi kerak.")
+        params["sample_times"] = [round(float(value), 4) for value in sample_times]
+        params["clip_len_s"] = float(clip_len_s)
     if segment:
         params["segment"] = True
         params["min_track_s"] = min_track_s
@@ -115,10 +137,28 @@ def analyze_to_disk(
         existing = json.loads(report_path.read_text(encoding="utf-8"))
         if existing.get("file_hash") == file_hash and existing.get("params_hash") == params_hash:
             return existing
-    measured = measure.analyze_file(path, sr=sr, clip=clip)
-    measured.pop("params", None)
-    stem_result = stems_module(path, clip) if stems else {"status": "off"}
-    tag_result = tags_module(path, clip) if tags else {"status": "off"}
+    samples = None
+    if sampling:
+        info = io.probe(path)
+        duration_s = float(info.get("duration_s") or 0.0)
+        measured = {}
+        stem_result = {"status": "off"}
+        tag_result = {"status": "off"}
+        samples = _analyze_samples(
+            path,
+            duration_s=duration_s,
+            starts=list(sample_times or []),
+            clip_len_s=float(clip_len_s or 0.0),
+            sr=sr,
+            stems=stems,
+            tags=tags,
+        )
+    else:
+        measured = measure.analyze_file(path, sr=sr, clip=clip)
+        measured.pop("params", None)
+        stem_result = stems_module(path, clip) if stems else {"status": "off"}
+        tag_result = tags_module(path, clip) if tags else {"status": "off"}
+        duration_s = None
     payload = {
         "file_name": path.name,
         "file_hash": file_hash,
@@ -130,6 +170,8 @@ def analyze_to_disk(
         "stems": stem_result,
         "tags": tag_result,
     }
+    if samples is not None:
+        payload["samples"] = samples
     dest.mkdir(parents=True, exist_ok=True)
     segmentation = None
     if segment:
@@ -150,11 +192,13 @@ def analyze_to_disk(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    _write_csv(dest / "timeline.csv", measured, stem_result)
-    _write_plots(dest / "plots", path, clip, sr, measured, stem_result)
+    if not sampling:
+        _write_csv(dest / "timeline.csv", measured, stem_result)
+        _write_plots(dest / "plots", path, clip, sr, measured, stem_result)
     (dest / "report.md").write_text(_markdown(payload), encoding="utf-8")
-    duration = _lookup(measured, "duration_s")
-    duration_s = duration["value"] if isinstance(duration, dict) else None
+    if not sampling:
+        duration = _lookup(measured, "duration_s")
+        duration_s = duration["value"] if isinstance(duration, dict) else None
     store.insert_analysis(
         file_hash,
         params_hash,
@@ -172,6 +216,85 @@ def stems_module(path: Path, clip):
 
 def tags_module(path: Path, clip):
     return tags.label(path, clip)
+
+
+def parse_sample_times(text: str) -> list[float]:
+    """Clock list: `5:00,15:00` is minutes:seconds. Three parts are h:mm:ss."""
+    if not text or not text.strip():
+        raise io.AudioLabError("--sample-times bo'sh.")
+    times = []
+    for piece in text.split(","):
+        piece = piece.strip()
+        parts = piece.split(":")
+        if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
+            raise io.AudioLabError(f"Vaqt formati noto'g'ri: {piece}")
+        numbers = [int(part) for part in parts]
+        if len(numbers) == 2:
+            hours, minutes, seconds = 0, numbers[0], numbers[1]
+        else:
+            hours, minutes, seconds = numbers
+            if minutes > 59:
+                raise io.AudioLabError(f"Vaqt formati noto'g'ri: {piece}")
+        if seconds > 59:
+            raise io.AudioLabError(f"Vaqt formati noto'g'ri: {piece}")
+        times.append(float(hours * 3600 + minutes * 60 + seconds))
+    return times
+
+
+def clip_windows(duration_s: float, starts: list[float], clip_len_s: float):
+    """Keep clips that fit. A window that passes the file end is skipped."""
+    kept = []
+    skipped = []
+    for start in starts:
+        end = float(start) + float(clip_len_s)
+        if start < 0 or end > float(duration_s) + 1e-3:
+            skipped.append(
+                {
+                    "start_s": round(float(start), 4),
+                    "end_s": round(end, 4),
+                    "warning": (
+                        f"Parcha o'tkazib yuborildi: {float(start):.4f} s + {float(clip_len_s):.4f} s "
+                        f"fayl chegarasidan oshadi ({float(duration_s):.4f} s)."
+                    ),
+                }
+            )
+        else:
+            kept.append((float(start), end))
+    return kept, skipped
+
+
+def _analyze_samples(path, duration_s, starts, clip_len_s, sr, stems, tags) -> dict:
+    from audio_lab.segment import clip_diversity
+
+    kept, skipped = clip_windows(duration_s, starts, clip_len_s)
+    clips = []
+    waves = []
+    for index, (start, end) in enumerate(kept, start=1):
+        window = (start, end)
+        measured = measure.analyze_file(path, sr=sr, clip=window)
+        measured.pop("params", None)
+        clips.append(
+            {
+                "index": index,
+                "start_s": round(start, 4),
+                "end_s": round(end, 4),
+                "metrics": measured,
+                "stems": stems_module(path, window) if stems else {"status": "off"},
+                "tags": tags_module(path, window) if tags else {"status": "off"},
+            }
+        )
+        waves.append(io.load_mono(path, sr=config.SEG_SR, start_s=start, end_s=end))
+    diversity = clip_diversity(waves, config.SEG_SR) if waves else {
+        "distance": [],
+        "style_groups": {"n": 0, "kind": "proxy", "clusters": [], "note": "Parcha yo'q."},
+    }
+    return {
+        "clip_len_s": clip_len_s,
+        "clips": clips,
+        "skipped": skipped,
+        "feature_distance": diversity["distance"],
+        "style_groups": diversity["style_groups"],
+    }
 
 
 def write_segment_bundle(
@@ -312,7 +435,7 @@ _SEGMENT_COLUMNS = (
     "start_s",
     "end_s",
     "duration_s",
-    "confidence",
+    "strength",
     "evidence",
     "transition_in",
     "transition_in_len_s",
@@ -330,7 +453,7 @@ def _segment_row(track: dict) -> dict:
         "start_s": track["start_s"],
         "end_s": track["end_s"],
         "duration_s": track["duration_s"],
-        "confidence": track.get("confidence") or "",
+        "strength": track.get("strength") or "",
         "evidence": "|".join(track.get("evidence") or []),
         "transition_in": track.get("transition_in") or "",
         "transition_in_len_s": (
@@ -356,6 +479,7 @@ def _write_segment_csv(path: Path, rows: list[dict]) -> None:
                 extra.append(key)
     fieldnames = list(_SEGMENT_COLUMNS) + extra
     with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(f"# {STRENGTH_NOTE}\n")
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
@@ -372,7 +496,7 @@ def _write_segment_plots(folder: Path, result: dict) -> None:
         ax.plot(np.arange(len(novelty)) * config.SEG_HOP_S, np.asarray(novelty), color="#222")
     colors = {"high": "#1b7f3a", "medium": "#d98a00", "low": "#b00020"}
     for row in result.get("boundaries") or []:
-        ax.axvline(row["time_s"], color=colors.get(row["confidence"], "#666666"), alpha=0.85)
+        ax.axvline(row["time_s"], color=colors.get(row["strength"], "#666666"), alpha=0.85)
     ax.set_xlabel("s")
     ax.set_ylabel("novelty")
     fig.tight_layout()
@@ -412,7 +536,9 @@ def _track_lines(segments: dict) -> list[str]:
     count = summary.get("n_tracks") or {}
     shown = count.get("value", segments.get("n_tracks"))
     lines = [
-        "## Treklar",
+        f"## {BOUNDARY_TITLE}",
+        "",
+        STRENGTH_NOTE,
         "",
         f"Treklar soni: {shown}. Manba: {segments.get('source')}.",
     ]
@@ -425,12 +551,12 @@ def _track_lines(segments: dict) -> list[str]:
             f"precision {agreement.get('precision')}, recall {agreement.get('recall')}."
         )
     lines.append("")
-    lines.append("| index | start_s | end_s | confidence | transition_in |")
+    lines.append("| index | start_s | end_s | strength | transition_in |")
     lines.append("| --- | --- | --- | --- | --- |")
     for track in segments.get("tracks") or []:
         lines.append(
             f"| {track['index']} | {track['start_s']} | {track['end_s']} | "
-            f"{track.get('confidence') or ''} | {track.get('transition_in') or ''} |"
+            f"{track.get('strength') or ''} | {track.get('transition_in') or ''} |"
         )
     groups = segments.get("style_groups") or {}
     diff = (summary.get("neighbor_lufs_diff_db") or {}).get("value")
@@ -614,11 +740,49 @@ def _markdown(payload: dict) -> str:
     if payload.get("segments"):
         lines.extend(_track_lines(payload["segments"]))
         lines.append("")
+    if payload.get("samples"):
+        lines.extend(_sample_lines(payload["samples"]))
+        lines.append("")
     lines.append(LIMITATIONS)
     if tag_result.get("license"):
         lines.append(tag_result["license"])
         lines.append("")
     return "\n".join(lines)
+
+
+def _sample_lines(samples: dict) -> list[str]:
+    lines = ["## Parchalar", ""]
+    for item in samples.get("skipped") or []:
+        lines.append(item.get("warning") or "")
+    if samples.get("skipped"):
+        lines.append("")
+    lines.append("| index | start_s | end_s | lufs | centroid_hz |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for clip in samples.get("clips") or []:
+        metrics = clip.get("metrics") or {}
+        lines.append(
+            f"| {clip['index']} | {clip['start_s']} | {clip['end_s']} | "
+            f"{_metric_value(metrics, 'loudness.integrated_lufs')} | "
+            f"{_metric_value(metrics, 'spectral.centroid_hz_median')} |"
+        )
+    lines.append("")
+    lines.append("Feature masofa [PROKSI]")
+    lines.append("")
+    distance = samples.get("feature_distance") or []
+    if distance:
+        header = "| | " + " | ".join(str(clip["index"]) for clip in samples.get("clips") or []) + " |"
+        rule = "| --- | " + " | ".join("---" for _ in distance) + " |"
+        lines.append(header)
+        lines.append(rule)
+        for index, row in enumerate(distance, start=1):
+            cells = " | ".join(str(value) for value in row)
+            lines.append(f"| {index} | {cells} |")
+        lines.append("")
+    groups = samples.get("style_groups") or {}
+    lines.append(f"style_groups: {groups.get('n')} [PROKSI]")
+    for cluster in groups.get("clusters") or []:
+        lines.append(f"- klaster {cluster.get('id')}: {cluster.get('tracks')}")
+    return lines
 
 
 def _lookup(node: dict, path: str):

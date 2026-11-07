@@ -137,8 +137,11 @@ def _aggregate_tracks(reports: list[dict], name: str) -> dict:
     for report in reports:
         segments = report.get("segments") or {}
         tracks = segments.get("tracks") or []
-        per_video.append(len(tracks))
+        clips = ((report.get("samples") or {}).get("clips")) or []
+        per_video.append(len(tracks) + len(clips))
         style_n = (segments.get("style_groups") or {}).get("n")
+        if style_n is None:
+            style_n = ((report.get("samples") or {}).get("style_groups") or {}).get("n")
         if style_n is not None:
             style_groups.append(int(style_n))
         for track in tracks:
@@ -147,9 +150,12 @@ def _aggregate_tracks(reports: list[dict], name: str) -> dict:
                 transitions[kind] += 1
             durations.append(track.get("duration_s"))
             track_reports.append({"metrics": track.get("metrics") or {}, "stems": track.get("stems") or {}})
+        for clip in clips:
+            durations.append(float(clip["end_s"]) - float(clip["start_s"]))
+            track_reports.append({"metrics": clip.get("metrics") or {}, "stems": clip.get("stems") or {}})
     if not track_reports:
         raise io.AudioLabError(
-            "per-track uchun treklar yo'q. Avval analyze --segment ishga tushiring."
+            "per-track uchun trek yoki parcha yo'q. analyze --segment yoki --sample-times kerak."
         )
     payload = _aggregate(track_reports, name)
     n_tracks = len(track_reports)

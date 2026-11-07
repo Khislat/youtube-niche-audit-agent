@@ -290,7 +290,7 @@ def _decide(features, silence_runs, level, duration_s, min_track_s, expect_track
             {
                 "time_s": round(float(time_s), 4),
                 "score": round(float(peak_score), 4),
-                "confidence": _confidence(peak_score, score),
+                "strength": _strength(peak_score, score),
                 "evidence": evidence,
                 "transition": _transition(time_s, silence_runs, dip_runs),
             }
@@ -487,7 +487,7 @@ def _peaks_at_k(score: np.ndarray, duration_s: float, min_track_s: float, k: flo
     return kept
 
 
-def _confidence(peak_score: float, score: np.ndarray) -> str:
+def _strength(peak_score: float, score: np.ndarray) -> str:
     median = float(np.median(score)) if score.size else 0.0
     mad = float(np.median(np.abs(score - median))) if score.size else 1.0
     if mad < 1e-8:
@@ -554,7 +554,7 @@ def _tracks_from_boundaries(boundaries, duration_s, source: str) -> dict:
                 "start_s": round(float(start_s), 4),
                 "end_s": round(float(end_s), 4),
                 "duration_s": round(float(end_s - start_s), 4),
-                "confidence": None if incoming is None else incoming["confidence"],
+                "strength": None if incoming is None else incoming["strength"],
                 "evidence": ["start"] if incoming is None else list(incoming["evidence"]),
                 "transition_in": None if incoming is None else incoming["transition"]["kind"],
                 "transition_in_len_s": None if incoming is None else incoming["transition"]["length_s"],
@@ -585,7 +585,7 @@ def _cuts_from_starts(starts, duration, source, evidence, names=None) -> dict:
             {
                 "time_s": time_s,
                 "score": None,
-                "confidence": "high",
+                "strength": "high",
                 "evidence": list(evidence),
                 "transition": {"kind": "hard", "length_s": 0.0},
             }
@@ -817,6 +817,40 @@ def feature_distance_matrix(result: dict) -> tuple[list[int], np.ndarray]:
         for right in range(count):
             distance[left, right] = 1.0 - _cosine(means[left], means[right])
     return labels, distance
+
+
+def clip_diversity(waves: list[np.ndarray], sr: int) -> dict:
+    """Cosine distance and silhouette clusters for sampled clips.
+
+    Same proxy as track style_groups: z-scored chroma, MFCC, contrast, and RMS,
+    average-linkage clustering, cluster count by silhouette.
+    """
+    blocks = []
+    spans = []
+    cursor = 0.0
+    for wave in waves:
+        frames = _frame_features(np.asarray(wave, dtype=np.float64), sr)
+        if frames.size == 0:
+            frames = np.zeros((1, 33), dtype=np.float64)
+        blocks.append(frames)
+        start = cursor
+        cursor += frames.shape[0] * config.SEG_HOP_S
+        spans.append((start, cursor))
+    if not blocks:
+        return {
+            "distance": [],
+            "style_groups": {"n": 0, "kind": "proxy", "clusters": [], "note": "Parcha yo'q."},
+        }
+    result = {
+        "features": _zscore(np.vstack(blocks)),
+        "tracks": [
+            {"index": index, "start_s": start, "end_s": end, "duration_s": end - start}
+            for index, (start, end) in enumerate(spans, start=1)
+        ],
+    }
+    _labels, matrix = feature_distance_matrix(result)
+    distance = [[round(float(value), 4) for value in row] for row in matrix.tolist()]
+    return {"distance": distance, "style_groups": _style_groups(result)}
 
 
 def export_segments(path: str | Path, result: dict, directory: str | Path) -> list[Path]:

@@ -87,7 +87,7 @@ def _low_medium_share(result: dict) -> float:
     rows = result["boundaries"]
     if not rows:
         return 0.0
-    return sum(row["confidence"] in ("low", "medium") for row in rows) / len(rows)
+    return sum(row["strength"] in ("low", "medium") for row in rows) / len(rows)
 
 
 def _report(name: str, score: dict) -> None:
@@ -161,7 +161,7 @@ def test_d_same_timbre_is_less_confident_than_hard_cuts():
 
     The spec sentence says the low/medium share should be lower than A.
     That contradicts the hard case. The measured share is higher, and this
-    test follows that: every boundary has a confidence, and fewer of them
+    test follows that: every boundary has a strength, and fewer of them
     are high than in A.
     """
     hard = detect_from_audio(np.concatenate(_distinct(12)), SR, min_track_s=MIN_TRACK)
@@ -174,7 +174,7 @@ def test_d_same_timbre_is_less_confident_than_hard_cuts():
     score = score_boundaries(boundary_times(result), truth, 2.0)
     _report("D", score)
     assert result["boundaries"]
-    assert all(row["confidence"] in ("low", "medium", "high") for row in result["boundaries"])
+    assert all(row["strength"] in ("low", "medium", "high") for row in result["boundaries"])
     assert _low_medium_share(result) > _low_medium_share(hard)
 
 
@@ -187,7 +187,7 @@ def test_e_slow_evolution_has_at_most_one_false_boundary():
     score = score_boundaries(predicted, [], 2.0)
     _report("E", score)
     assert len(predicted) <= 1
-    assert all(row["confidence"] in ("low", "medium", "high") for row in result["boundaries"])
+    assert all(row["strength"] in ("low", "medium", "high") for row in result["boundaries"])
 
 
 def test_f_repeated_track_is_marked(tmp_path):
@@ -316,12 +316,16 @@ def test_analyze_segment_measures_each_track_at_requested_sr(tmp_path):
         assert isinstance(centroid["value"], float)
     folder = out / f"mix_{payload['hash8']}"
     csv_text = (folder / "segments.csv").read_text(encoding="utf-8")
-    assert csv_text.splitlines()[0].startswith("index,start_s,end_s")
-    assert "lufs" in csv_text.splitlines()[0]
+    header = next(line for line in csv_text.splitlines() if line.startswith("index,"))
+    assert header.startswith("index,start_s,end_s")
+    assert "strength" in header
+    assert "lufs" in header
     assert (folder / "plots" / "novelty.png").is_file()
     assert (folder / "plots" / "transitions.png").is_file()
     assert (folder / "plots" / "feature_distance.png").is_file()
-    assert "Treklar" in (folder / "report.md").read_text(encoding="utf-8")
+    report_text = (folder / "report.md").read_text(encoding="utf-8")
+    assert "Chegara nomzodlari" in report_text
+    assert "to'g'riligini emas" in report_text
     assert "features" not in payload["segments"]
 
 
@@ -384,6 +388,62 @@ def test_profile_per_track_uses_tracks(tmp_path):
     assert "kichik tanlama" in text
     assert payload["track_stats"]["tracks_per_video"]["median"] == 1
     assert "loudness.integrated_lufs" in payload["metrics"]
+
+
+def test_sample_times_keep_interior_clips_and_skip_the_end(tmp_path):
+    path = tmp_path / "tones.wav"
+    synth.write_wav(
+        path,
+        np.concatenate(
+            [
+                synth.sine(220.0, 5.0),
+                synth.sine(880.0, 5.0),
+                synth.sine(440.0, 5.0),
+                synth.sine(110.0, 5.0),
+            ]
+        ),
+    )
+    out = tmp_path / "out"
+    payload = analyze_to_disk(
+        path,
+        out_dir=out,
+        sr=22050,
+        sample_times=[0.0, 5.0, 10.0, 16.0],
+        clip_len_s=5.0,
+        db_path=tmp_path / "audio.db",
+    )
+    samples = payload["samples"]
+    assert [(clip["start_s"], clip["end_s"]) for clip in samples["clips"]] == [
+        (0.0, 5.0),
+        (5.0, 10.0),
+        (10.0, 15.0),
+    ]
+    assert len(samples["skipped"]) == 1
+    assert samples["skipped"][0]["start_s"] == 16.0
+    assert "o'tkazib yuborildi" in samples["skipped"][0]["warning"]
+    centroids = [
+        clip["metrics"]["spectral"]["centroid_hz_median"]["value"] for clip in samples["clips"]
+    ]
+    assert centroids[0] < centroids[2] < centroids[1]
+    assert len(samples["feature_distance"]) == 3
+    assert all(len(row) == 3 for row in samples["feature_distance"])
+    assert samples["style_groups"]["kind"] == "proxy"
+    text = next(out.rglob("report.md")).read_text(encoding="utf-8")
+    assert "style_groups:" in text
+    assert "[PROKSI]" in text
+    assert "Parcha o'tkazib yuborildi" in text
+
+    profile = build_profile(
+        out,
+        "clips",
+        out_dir=tmp_path / "profile",
+        db_path=tmp_path / "profile.db",
+        per_track=True,
+    )
+    aggregated = json.loads(profile.read_text(encoding="utf-8"))
+    assert aggregated["n_files"] == 1
+    assert aggregated["n_tracks"] == 3
+    assert "loudness.integrated_lufs" in aggregated["metrics"]
 
 
 def Path_audio_lab():

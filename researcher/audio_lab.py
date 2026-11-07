@@ -11,7 +11,7 @@ from audio_lab import config, io
 from audio_lab.compare import compare_track
 from audio_lab.profile import build_profile
 from audio_lab.chapters import parse_tracklist
-from audio_lab.report import analyze_to_disk, long_file_warning, write_segment_bundle
+from audio_lab.report import analyze_to_disk, long_file_warning, parse_sample_times, write_segment_bundle
 from audio_lab.segment import read_manual_csv
 
 
@@ -30,6 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     analyze.add_argument("--segment", action="store_true")
     analyze.add_argument("--min-track", type=float, default=config.SEG_MIN_TRACK_S)
     analyze.add_argument("--expect-tracks", default=None)
+    analyze.add_argument("--sample-times", default=None, help="Masalan 5:00,15:00,25:00")
+    analyze.add_argument("--clip-len", type=float, default=None, help="Parcha uzunligi, soniya. Default 240")
 
     profile = sub.add_parser("profile")
     profile.add_argument("--dir", required=True, dest="directory")
@@ -106,10 +108,11 @@ def _analyze(args) -> int:
     if not files:
         raise io.AudioLabError(f"Audio fayl topilmadi: {source}")
     for path in files:
-        info = io.probe(path)
-        warning = long_file_warning(info.get("duration_s"), args.segment)
-        if warning:
-            print(warning, file=sys.stderr)
+        if not args.sample_times:
+            info = io.probe(path)
+            warning = long_file_warning(info.get("duration_s"), args.segment)
+            if warning:
+                print(warning, file=sys.stderr)
         payload = analyze_to_disk(
             path,
             out_dir=args.out,
@@ -121,7 +124,11 @@ def _analyze(args) -> int:
             segment=args.segment,
             min_track_s=args.min_track,
             expect_tracks=_expect(args.expect_tracks),
+            sample_times=parse_sample_times(args.sample_times) if args.sample_times else None,
+            clip_len_s=args.clip_len,
         )
+        for item in (payload.get("samples") or {}).get("skipped") or []:
+            print(item["warning"], file=sys.stderr)
         print(payload["file_name"], payload["hash8"])
     return 0
 

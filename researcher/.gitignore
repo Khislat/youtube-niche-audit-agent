@@ -9,6 +9,22 @@ data/*.db
 data/audio_inputs/
 data/audio_models/
 output/*.csv
+output/mixes/
 output/audio/**/*.wav
 output/audio/*.wav
+mix.wav
+mix_truth.csv
+*_truth.csv
 tests/audio_lab/data/*.wav
+
+# Boshqa odamning musiqasi. Hech qayerda gitga tushmasin.
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.ogg
+*.aac
+*.aiff
+*.aif
+*.wma
+*.opus
