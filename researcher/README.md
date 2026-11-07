@@ -116,7 +116,25 @@ python audio_lab.py profile --dir papka --name uslub
 python audio_lab.py compare --track track.wav --profile output/audio/style_profile_uslub.json
 ```
 
+Uzun miksni treklarga ajratish:
+
+```bash
+python audio_lab.py segment --input mix.wav --expect-tracks 12-15 --min-track 90
+python audio_lab.py analyze --input mix.wav --segment --sr 44100
+python audio_lab.py profile --dir papka --name uslub --per-track
+```
+
+Segmentatsiya o'zi 22050 Hz da ishlaydi. `--sr` faqat har trekning chastota va spektr o'lchovlariga tegishli; default 22050. Tiniqlik tahlili uchun 44100 tavsiya etiladi. 15 daqiqadan uzun faylda `analyze` ogohlantiradi, lekin `--segment` berilmasa segmentatsiyani o'zi yoqmaydi. `--expect-tracks` trek sonini majburlamaydi.
+
+`--boundaries manual.csv` (`start_s` ustuni) avtomatik chegarani almashtiradi. Ikkala manba berilsa, qo'lda berilgan chegaralar ishlatiladi. `--tracklist-text` foydalanuvchi joylagan matndan vaqtni oladi va avtomatik chegaralar bilan ±5 s da solishtiriladi. `--export-segments` har trekni `output/audio/<fayl>_<hash>/segments/NN.wav` ga kesadi; default o'chiq.
+
+Balandlik `ffmpeg ebur128` bilan o'lchanadi.
+
 `--stems` va `--tags` default o'chiq. Bir xil fayl va parametrlar qayta hisoblanmaydi; `--refresh` majbur qiladi. Raqamlar 4 o'nli yaxlitlanadi.
+
+### Chegarani aniqlash cheklovlari
+
+Qattiq kesish va 0.5 soniyadan uzun jimlik aniqroq topiladi. Crossfade va bir-biriga o'xshash tembrli treklarda chegara bir necha soniyaga surilishi yoki umuman tushib qolishi mumkin. Har chegarada `confidence` va `evidence` bor. Shubhali joyda `manual.csv` yoki tracklist matnidan foydalaning. Takror trek va `style_groups` proksi.
 
 ### Metrika turlari
 

@@ -66,6 +66,16 @@ LIMITATIONS = """## Cheklovlar
 """
 
 
+def long_file_warning(duration_s: float | None, segment: bool) -> str | None:
+    """A long mix is only a warning. Segmentation stays off until asked."""
+    if segment or duration_s is None or duration_s <= config.SEG_LONG_FILE_S:
+        return None
+    return (
+        "Fayl 15 daqiqadan uzun. Butun fayl o'rtachasi treklarni aralashtiradi. "
+        "analyze --segment ni qo'lda yoqing; segmentatsiya o'zi yoqilmaydi."
+    )
+
+
 def analyze_to_disk(
     path: str | Path,
     out_dir: str | Path | None = None,
@@ -75,6 +85,12 @@ def analyze_to_disk(
     tags: bool = False,
     refresh: bool = False,
     db_path: Path | None = None,
+    segment: bool = False,
+    min_track_s: float = config.SEG_MIN_TRACK_S,
+    expect_tracks: tuple[int, int] | None = None,
+    export_segments: bool = False,
+    manual_starts: list[float] | None = None,
+    tracklist: list[dict] | None = None,
 ) -> dict:
     path = Path(path)
     out = Path(out_dir or config.DEFAULT_OUT_DIR)
@@ -86,6 +102,12 @@ def analyze_to_disk(
         "stems": bool(stems),
         "tags": bool(tags),
     }
+    if segment:
+        params["segment"] = True
+        params["min_track_s"] = min_track_s
+        params["expect_tracks"] = (
+            None if expect_tracks is None else f"{expect_tracks[0]}-{expect_tracks[1]}"
+        )
     params_hash = store.params_sha256(params)
     dest = out / f"{_safe_stem(path)}_{file_hash[:8]}"
     report_path = dest / "report.json"
@@ -109,6 +131,21 @@ def analyze_to_disk(
         "tags": tag_result,
     }
     dest.mkdir(parents=True, exist_ok=True)
+    segmentation = None
+    if segment:
+        segmentation = _segment_tracks(
+            path,
+            sr=sr,
+            stems=stems,
+            tags=tags,
+            min_track_s=min_track_s,
+            expect_tracks=expect_tracks,
+            manual_starts=manual_starts,
+            tracklist=tracklist,
+            export_segments=export_segments,
+            dest=dest,
+        )
+        payload["segments"] = segmentation
     report_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
@@ -135,6 +172,272 @@ def stems_module(path: Path, clip):
 
 def tags_module(path: Path, clip):
     return tags.label(path, clip)
+
+
+def write_segment_bundle(
+    path: str | Path,
+    out_dir: str | Path | None = None,
+    min_track_s: float = config.SEG_MIN_TRACK_S,
+    expect_tracks: tuple[int, int] | None = None,
+    manual_starts: list[float] | None = None,
+    tracklist: list[dict] | None = None,
+    export_segments: bool = False,
+) -> Path:
+    """Boundary report only. Per-track LUFS and spectra stay on analyze --segment."""
+    from audio_lab import segment as segment_mod
+
+    path = Path(path)
+    out = Path(out_dir or config.DEFAULT_OUT_DIR)
+    file_hash = store.file_sha256(path)
+    dest = out / f"{_safe_stem(path)}_{file_hash[:8]}"
+    dest.mkdir(parents=True, exist_ok=True)
+    detected = segment_mod.segment_file(
+        path,
+        min_track_s=min_track_s,
+        expect_tracks=expect_tracks,
+        manual_starts=manual_starts,
+        tracklist=tracklist,
+    )
+    rows = [_segment_row(track) for track in detected["tracks"]]
+    _write_segment_csv(dest / "segments.csv", rows)
+    _write_segment_plots(dest / "plots", detected)
+    if export_segments:
+        segment_mod.export_segments(path, detected, dest / "segments")
+    (dest / "segment.json").write_text(
+        json.dumps(segment_mod.json_ready(detected), ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return dest
+
+
+def _segment_tracks(
+    path: Path,
+    sr: int,
+    stems: bool,
+    tags: bool,
+    min_track_s: float,
+    expect_tracks,
+    manual_starts,
+    tracklist,
+    export_segments: bool,
+    dest: Path,
+) -> dict:
+    from audio_lab import segment as segment_mod
+
+    detected = segment_mod.segment_file(
+        path,
+        min_track_s=min_track_s,
+        expect_tracks=expect_tracks,
+        manual_starts=manual_starts,
+        tracklist=tracklist,
+    )
+    lufs_values = []
+    rows = []
+    for track in detected["tracks"]:
+        end_s = track["end_s"] if track["end_s"] > track["start_s"] else track["start_s"] + 0.05
+        clip = (float(track["start_s"]), float(end_s))
+        measured = measure.analyze_file(path, sr=sr, clip=clip)
+        measured.pop("params", None)
+        track["metrics"] = measured
+        track["stems"] = stems_module(path, clip) if stems else {"status": "off"}
+        track["tags"] = tags_module(path, clip) if tags else {"status": "off"}
+        lufs_values.append(_metric_value(measured, "loudness.integrated_lufs"))
+        rows.append(_segment_row(track))
+    detected["summary"]["neighbor_lufs_diff_db"] = _neighbor_lufs(lufs_values)
+    _fill_cluster_means(detected)
+    _write_segment_csv(dest / "segments.csv", rows)
+    _write_segment_plots(dest / "plots", detected)
+    if export_segments:
+        segment_mod.export_segments(path, detected, dest / "segments")
+    return segment_mod.json_ready(detected)
+
+
+def _neighbor_lufs(values: list) -> dict:
+    diffs = []
+    for earlier, later in zip(values, values[1:]):
+        if type(earlier) in (int, float) and type(later) in (int, float):
+            diffs.append(abs(float(later) - float(earlier)))
+    median = None if not diffs else round(float(np.median(diffs)), 4)
+    return {
+        "value": median,
+        "unit": "dB",
+        "kind": "measured",
+        "note": "Qo'shni treklar integrallangan LUFS farqi medianasi.",
+    }
+
+
+def _fill_cluster_means(detected: dict) -> None:
+    groups = detected.get("style_groups") or {}
+    by_index = {track["index"]: track for track in detected["tracks"]}
+    for cluster in groups.get("clusters") or []:
+        members = [
+            by_index[index]
+            for index in cluster.get("tracks") or []
+            if index in by_index and by_index[index].get("metrics")
+        ]
+        if not members:
+            continue
+        cluster["mean_metrics"] = {
+            "lufs": _mean_metric(members, "loudness.integrated_lufs", "LUFS"),
+            "centroid_hz": _mean_metric(members, "spectral.centroid_hz_median", "Hz"),
+            "onsets_per_sec": _mean_metric(members, "onsets.onsets_per_sec", "1/s"),
+        }
+
+
+def _mean_metric(tracks: list[dict], path: str, unit: str) -> dict:
+    values = []
+    for track in tracks:
+        value = _metric_value(track.get("metrics") or {}, path)
+        if type(value) in (int, float):
+            values.append(float(value))
+    mean = None if not values else round(float(np.mean(values)), 4)
+    return {
+        "value": mean,
+        "unit": unit,
+        "kind": "proxy",
+        "note": "Klasterdagi treklar o'rtachasi.",
+    }
+
+
+def _metric_value(node: dict, path: str):
+    item = _lookup(node, path)
+    if not isinstance(item, dict):
+        return ""
+    value = item.get("value")
+    return "" if value is None else value
+
+
+_SEGMENT_COLUMNS = (
+    "index",
+    "start_s",
+    "end_s",
+    "duration_s",
+    "confidence",
+    "evidence",
+    "transition_in",
+    "transition_in_len_s",
+    "key",
+    "centroid",
+    "lufs",
+    "onsets_per_sec",
+)
+
+
+def _segment_row(track: dict) -> dict:
+    metrics = track.get("metrics") or {}
+    row = {
+        "index": track["index"],
+        "start_s": track["start_s"],
+        "end_s": track["end_s"],
+        "duration_s": track["duration_s"],
+        "confidence": track.get("confidence") or "",
+        "evidence": "|".join(track.get("evidence") or []),
+        "transition_in": track.get("transition_in") or "",
+        "transition_in_len_s": (
+            "" if track.get("transition_in_len_s") is None else track["transition_in_len_s"]
+        ),
+        "key": _metric_value(metrics, "key.label") if metrics else "",
+        "centroid": _metric_value(metrics, "spectral.centroid_hz_median") if metrics else "",
+        "lufs": _metric_value(metrics, "loudness.integrated_lufs") if metrics else "",
+        "onsets_per_sec": _metric_value(metrics, "onsets.onsets_per_sec") if metrics else "",
+    }
+    stems = track.get("stems") or {}
+    if stems.get("status") == "ok":
+        for name, stem in (stems.get("stems") or {}).items():
+            row[f"stem_{name}_share"] = _metric_value(stem, "energy_share")
+    return row
+
+
+def _write_segment_csv(path: Path, rows: list[dict]) -> None:
+    extra = []
+    for row in rows:
+        for key in row:
+            if key not in _SEGMENT_COLUMNS and key not in extra:
+                extra.append(key)
+    fieldnames = list(_SEGMENT_COLUMNS) + extra
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+
+
+def _write_segment_plots(folder: Path, result: dict) -> None:
+    from audio_lab.segment import feature_distance_matrix
+
+    folder.mkdir(parents=True, exist_ok=True)
+    novelty = result.get("novelty")
+    fig, ax = plt.subplots(figsize=(8, 3))
+    if novelty is not None and len(novelty):
+        ax.plot(np.arange(len(novelty)) * config.SEG_HOP_S, np.asarray(novelty), color="#222")
+    colors = {"high": "#1b7f3a", "medium": "#d98a00", "low": "#b00020"}
+    for row in result.get("boundaries") or []:
+        ax.axvline(row["time_s"], color=colors.get(row["confidence"], "#666666"), alpha=0.85)
+    ax.set_xlabel("s")
+    ax.set_ylabel("novelty")
+    fig.tight_layout()
+    fig.savefig(folder / "novelty.png")
+    plt.close(fig)
+
+    kind_color = {"hard": "#3d5a80", "gap": "#98c1d9", "crossfade": "#ee6c4d"}
+    fig, ax = plt.subplots(figsize=(8, 2.2))
+    for track in result.get("tracks") or []:
+        ax.barh(
+            0,
+            track["duration_s"],
+            left=track["start_s"],
+            color=kind_color.get(track.get("transition_in") or "", "#cccccc"),
+            edgecolor="white",
+        )
+    ax.set_xlabel("s")
+    ax.set_yticks([])
+    fig.tight_layout()
+    fig.savefig(folder / "transitions.png")
+    plt.close(fig)
+
+    _labels, matrix = feature_distance_matrix(result)
+    fig, ax = plt.subplots(figsize=(4, 4))
+    if matrix.size:
+        image = ax.imshow(matrix, origin="lower", aspect="auto", vmin=0, vmax=max(1.0, float(np.max(matrix))))
+        fig.colorbar(image, ax=ax)
+    ax.set_xlabel("trek")
+    ax.set_ylabel("trek")
+    fig.tight_layout()
+    fig.savefig(folder / "feature_distance.png")
+    plt.close(fig)
+
+
+def _track_lines(segments: dict) -> list[str]:
+    summary = segments.get("summary") or {}
+    count = summary.get("n_tracks") or {}
+    shown = count.get("value", segments.get("n_tracks"))
+    lines = [
+        "## Treklar",
+        "",
+        f"Treklar soni: {shown}. Manba: {segments.get('source')}.",
+    ]
+    if segments.get("warning"):
+        lines.append(segments["warning"])
+    agreement = segments.get("tracklist_agreement")
+    if agreement:
+        lines.append(
+            "Tracklist solishtirish (±5 s): "
+            f"precision {agreement.get('precision')}, recall {agreement.get('recall')}."
+        )
+    lines.append("")
+    lines.append("| index | start_s | end_s | confidence | transition_in |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for track in segments.get("tracks") or []:
+        lines.append(
+            f"| {track['index']} | {track['start_s']} | {track['end_s']} | "
+            f"{track.get('confidence') or ''} | {track.get('transition_in') or ''} |"
+        )
+    groups = segments.get("style_groups") or {}
+    diff = (summary.get("neighbor_lufs_diff_db") or {}).get("value")
+    lines.append("")
+    lines.append(f"style_groups: {groups.get('n')} [PROKSI]")
+    lines.append(f"Qo'shni LUFS farqi (median): {diff}")
+    return lines
 
 
 def _versions() -> dict:
@@ -308,6 +611,9 @@ def _markdown(payload: dict) -> str:
     else:
         lines.append(f"| Teglar | {tag_result.get('status', 'off')} | [EHTIMOLLIK] |")
     lines.append("")
+    if payload.get("segments"):
+        lines.extend(_track_lines(payload["segments"]))
+        lines.append("")
     lines.append(LIMITATIONS)
     if tag_result.get("license"):
         lines.append(tag_result["license"])

@@ -71,3 +71,35 @@ PITCH_CLASS_NAMES = (
 )
 
 AUDIO_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".aif")
+
+# Segmentation. Feature rate stays 22050 even when per-track measures use --sr.
+SEG_SR = 22050
+SEG_CHUNK_S = 600.0
+SEG_CHUNK_OVERLAP_S = 2.0
+SEG_HOP_S = 1.0
+SEG_WINDOW_S = 2.0
+SEG_KERNEL_HALF_S = (20, 30, 60)
+SEG_SILENCE_MIN_S = 0.5
+SEG_DIP_DB = 2.0
+SEG_DIP_MIN_S = 2.0
+SEG_DIP_MAX_S = 8.0
+SEG_DIP_MEDIAN_S = 21
+SEG_LEVEL_WINDOW_S = 3.0
+# Combined boundary score. Silence is strong so a gap wins over its two edges.
+SEG_W_NOVELTY = 1.0
+SEG_W_SILENCE = 1.4
+SEG_W_DIP = 0.9
+# Adaptive gate: median + k * MAD. One expect-tracks retry scales k by this.
+SEG_K = 2.6
+SEG_K_RETRY_SCALE = 0.30
+SEG_MIN_TRACK_S = 90.0
+SEG_CONF_HIGH_MAD = 8.0
+SEG_CONF_MED_MAD = 5.0
+SEG_DUP_MEAN_COSINE = 0.98
+SEG_DUP_CHROMA_COSINE = 0.95
+SEG_FIRST_CUE_MAX_S = 5.0
+SEG_TRACKLIST_TOL_S = 5.0
+SEG_LONG_FILE_S = 15 * 60
+SEG_PROFILE_MIN_TRACKS = 8
+# Suggest this rate for per-track band/spectral measures. Segmentation stays at SEG_SR.
+SEG_CLARITY_SR = 44100
