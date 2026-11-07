@@ -123,7 +123,10 @@ python audio_lab.py segment --input mix.wav --expect-tracks 12-15 --min-track 90
 python audio_lab.py analyze --input mix.wav --segment --sr 44100
 python audio_lab.py analyze --input mix.wav --sample-times 5:00,15:00,25:00,40:00,55:00 --clip-len 240
 python audio_lab.py profile --dir papka --name uslub --per-track
+python audio_lab.py summarize --report output/audio/<papka>/report.json --out output/audio/<papka>/summary.md
 ```
+
+`summarize` katta `report.json` dan 120 qatordan oshmaydigan `summary.md` yozadi. `--report` berilmasa `output/audio/` ichidagi eng yangi hisobot olinadi. Timeline va grafik nuqtalari kirmaydi. Parcha guruhlari silhouette emas, kosinus masofa `1.0` kesimi bilan olinadi va `[PROKSI, kichik tanlama]` deb belgilanadi.
 
 Segmentatsiya o'zi 22050 Hz da ishlaydi. `--sr` faqat har trekning chastota va spektr o'lchovlariga tegishli; default 22050. Tiniqlik tahlili uchun 44100 tavsiya etiladi. 15 daqiqadan uzun faylda `analyze` ogohlantiradi, lekin `--segment` berilmasa segmentatsiyani o'zi yoqmaydi. `--expect-tracks` trek sonini majburlamaydi.
 
@@ -131,7 +134,7 @@ Segmentatsiya o'zi 22050 Hz da ishlaydi. `--sr` faqat har trekning chastota va s
 
 Balandlik `ffmpeg ebur128` bilan o'lchanadi.
 
-Boshqa odamning musiqasini repo ildiziga qo'ymang. Alohida treklar `researcher/data/audio_inputs/<papka>/` ichida qoladi. Tayyor uzun miksni shu papkaga yoki repodan tashqaridagi yo'lga qo'yish ham mumkin. `wav`, `mp3`, `flac`, `m4a` va shu kabi audio gitignore da. `git add -f` bilan majburan qo'shmang.
+Boshqa odamning musiqasini repo ildiziga qo'ymang. Alohida treklar `researcher/data/audio_inputs/<papka>/` ichida qoladi. Tayyor uzun miksni shu papkaga yoki repodan tashqaridagi yo'lga qo'yish ham mumkin. `wav`, `mp3`, `flac`, `m4a`, `webm` va shu kabi audio gitignore da. `git add -f` bilan majburan qo'shmang.
 
 `--stems` va `--tags` default o'chiq. Bir xil fayl va parametrlar qayta hisoblanmaydi; `--refresh` majbur qiladi. Raqamlar 4 o'nli yaxlitlanadi.
 

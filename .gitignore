@@ -11,8 +11,8 @@ researcher/data/audio_inputs/
 researcher/data/audio_models/
 researcher/output/*.csv
 researcher/output/mixes/
-researcher/output/audio/**/*.wav
-researcher/output/audio/*.wav
+researcher/output/audio/**/summary.md
+researcher/output/audio/
 researcher/mix.wav
 researcher/mix_truth.csv
 researcher/**/*_truth.csv
@@ -29,3 +29,5 @@ researcher/tests/audio_lab/data/*.wav
 *.aif
 *.wma
 *.opus
+*.webm
+*.mkv

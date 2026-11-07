@@ -12,6 +12,7 @@ from audio_lab.compare import compare_track
 from audio_lab.profile import build_profile
 from audio_lab.chapters import parse_tracklist
 from audio_lab.report import analyze_to_disk, long_file_warning, parse_sample_times, write_segment_bundle
+from audio_lab.summarize import latest_report, summarize_report
 from audio_lab.segment import read_manual_csv
 
 
@@ -51,6 +52,10 @@ def main(argv: list[str] | None = None) -> int:
     segment.add_argument("--tracklist-text", default=None)
     segment.add_argument("--export-segments", action="store_true")
 
+    summarize = sub.add_parser("summarize")
+    summarize.add_argument("--report", default=None, help="report.json. Bo'sh bo'lsa eng yangi hisobot")
+    summarize.add_argument("--out", default=None, help="summary.md yo'li")
+
     compare = sub.add_parser("compare")
     compare.add_argument("--track", required=True)
     compare.add_argument("--profile", required=True)
@@ -65,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
             return _analyze(args)
         if args.command == "segment":
             return _segment(args)
+        if args.command == "summarize":
+            report = Path(args.report) if args.report else latest_report()
+            path = summarize_report(report, args.out)
+            print(path)
+            return 0
         if args.command == "profile":
             path = build_profile(
                 args.directory,

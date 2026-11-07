@@ -10,8 +10,8 @@ data/audio_inputs/
 data/audio_models/
 output/*.csv
 output/mixes/
-output/audio/**/*.wav
-output/audio/*.wav
+output/audio/**/summary.md
+output/audio/
 mix.wav
 mix_truth.csv
 *_truth.csv
@@ -28,3 +28,5 @@ tests/audio_lab/data/*.wav
 *.aif
 *.wma
 *.opus
+*.webm
+*.mkv

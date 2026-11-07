@@ -169,6 +169,7 @@ def analyze_to_disk(
         "metrics": measured,
         "stems": stem_result,
         "tags": tag_result,
+        "source_duration_s": None if duration_s is None else round(float(duration_s), 4),
     }
     if samples is not None:
         payload["samples"] = samples
@@ -751,20 +752,18 @@ def _markdown(payload: dict) -> str:
 
 
 def _sample_lines(samples: dict) -> list[str]:
-    lines = ["## Parchalar", ""]
+    from audio_lab.segment import FEATURE_DISTANCE_NOTE
+    from audio_lab.summarize import table_cells, table_header, table_rule
+
+    lines = ["## Parchalar", "", FEATURE_DISTANCE_NOTE, ""]
     for item in samples.get("skipped") or []:
         lines.append(item.get("warning") or "")
     if samples.get("skipped"):
         lines.append("")
-    lines.append("| index | start_s | end_s | lufs | centroid_hz |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    lines.append(table_header())
+    lines.append(table_rule())
     for clip in samples.get("clips") or []:
-        metrics = clip.get("metrics") or {}
-        lines.append(
-            f"| {clip['index']} | {clip['start_s']} | {clip['end_s']} | "
-            f"{_metric_value(metrics, 'loudness.integrated_lufs')} | "
-            f"{_metric_value(metrics, 'spectral.centroid_hz_median')} |"
-        )
+        lines.append("| " + " | ".join(table_cells(clip)) + " |")
     lines.append("")
     lines.append("Feature masofa [PROKSI]")
     lines.append("")
@@ -779,7 +778,10 @@ def _sample_lines(samples: dict) -> list[str]:
             lines.append(f"| {index} | {cells} |")
         lines.append("")
     groups = samples.get("style_groups") or {}
-    lines.append(f"style_groups: {groups.get('n')} [PROKSI]")
+    badge = groups.get("badge") or "PROKSI, kichik tanlama"
+    threshold = groups.get("distance_threshold")
+    cut = "" if threshold is None else f", dendrogram kesimi {threshold}"
+    lines.append(f"style_groups: {groups.get('n')} [{badge}]{cut}")
     for cluster in groups.get("clusters") or []:
         lines.append(f"- klaster {cluster.get('id')}: {cluster.get('tracks')}")
     return lines

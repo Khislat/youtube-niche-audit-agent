@@ -819,12 +819,56 @@ def feature_distance_matrix(result: dict) -> tuple[list[int], np.ndarray]:
     return labels, distance
 
 
-def clip_diversity(waves: list[np.ndarray], sr: int) -> dict:
-    """Cosine distance and silhouette clusters for sampled clips.
+FEATURE_DISTANCE_NOTE = (
+    "Feature masofa: chroma 12, MFCC 13, spectral contrast va RMS; "
+    "vaqt bo'yicha z-score, parcha o'rtachasi, kosinus masofa. [PROKSI]"
+)
 
-    Same proxy as track style_groups: z-scored chroma, MFCC, contrast, and RMS,
-    average-linkage clustering, cluster count by silhouette.
+
+def groups_by_distance(
+    matrix: list[list[float]] | np.ndarray,
+    indexes: list[int],
+    threshold: float = config.CLIP_GROUP_DISTANCE,
+) -> dict:
+    """Cut an average-linkage dendrogram at a fixed cosine distance.
+
+    Silhouette is not used. The threshold is the cut.
     """
+    note = "n<8 parcha bo'lsa guruhlar taxminiy."
+    groups = {
+        "n": 1 if indexes else 0,
+        "kind": "proxy",
+        "badge": "PROKSI, kichik tanlama",
+        "distance_threshold": threshold,
+        "clusters": [{"id": 1, "tracks": list(indexes)}] if indexes else [],
+        "note": note,
+    }
+    if len(indexes) < 2:
+        return groups
+    arr = np.asarray(matrix, dtype=np.float64)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    arr = np.maximum(arr, 0.0)
+    arr = (arr + arr.T) / 2.0
+    np.fill_diagonal(arr, 0.0)
+    condensed = squareform(arr, checks=False)
+    if float(np.max(condensed)) <= 1e-8:
+        return groups
+    linked = linkage(condensed, method="average")
+    labels = fcluster(linked, t=float(threshold), criterion="distance")
+    grouped: dict[int, list[int]] = {}
+    for index, label in zip(indexes, labels):
+        grouped.setdefault(int(label), []).append(int(index))
+    ordered = sorted(grouped.values(), key=lambda members: min(members))
+    groups["n"] = len(ordered)
+    groups["clusters"] = [
+        {"id": cluster_id, "tracks": members}
+        for cluster_id, members in enumerate(ordered, start=1)
+    ]
+    return groups
+
+
+def clip_diversity(waves: list[np.ndarray], sr: int) -> dict:
+    """Cosine distance of clip means. Groups use a fixed distance cut, not silhouette."""
     blocks = []
     spans = []
     cursor = 0.0
@@ -848,9 +892,13 @@ def clip_diversity(waves: list[np.ndarray], sr: int) -> dict:
             for index, (start, end) in enumerate(spans, start=1)
         ],
     }
-    _labels, matrix = feature_distance_matrix(result)
+    labels, matrix = feature_distance_matrix(result)
     distance = [[round(float(value), 4) for value in row] for row in matrix.tolist()]
-    return {"distance": distance, "style_groups": _style_groups(result)}
+    return {
+        "distance": distance,
+        "style_groups": groups_by_distance(distance, labels),
+        "feature_note": FEATURE_DISTANCE_NOTE,
+    }
 
 
 def export_segments(path: str | Path, result: dict, directory: str | Path) -> list[Path]:

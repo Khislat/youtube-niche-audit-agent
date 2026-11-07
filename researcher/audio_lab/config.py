@@ -70,7 +70,7 @@ PITCH_CLASS_NAMES = (
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
 )
 
-AUDIO_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".aif")
+AUDIO_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".aif", ".webm")
 
 # Segmentation. Feature rate stays 22050 even when per-track measures use --sr.
 SEG_SR = 22050
@@ -103,3 +103,5 @@ SEG_LONG_FILE_S = 15 * 60
 SEG_PROFILE_MIN_TRACKS = 8
 # Suggest this rate for per-track band/spectral measures. Segmentation stays at SEG_SR.
 SEG_CLARITY_SR = 44100
+# Sample-clip groups. Average-linkage cosine distance above this starts another group.
+CLIP_GROUP_DISTANCE = 1.0
