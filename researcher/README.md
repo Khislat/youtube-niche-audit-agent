@@ -70,3 +70,62 @@ pytest
 ## Hali yo'q
 
 Claude tahlili, thumbnail/rasm tahlili, ball, Notion, Telegram, autocomplete/scraping.
+
+## Audio Audit Lab (Faza 2b)
+
+Lokal audio faylni til modelsiz o'lchaydi. Internet, YouTube va LLM chaqiruvi yo'q.
+
+### O'rnatish
+
+`ffmpeg` tizimda bo'lishi kerak (`brew install ffmpeg`). Bo'lmasa buyruq tushunarli xato beradi.
+
+```bash
+cd researcher
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-audio.txt
+```
+
+Ixtiyoriy (sekin, og'ir):
+
+```bash
+pip install -r requirements-audio-extra.txt
+```
+
+`--stems` uchun Demucs `htdemucs_6s` og'irliklari tahlil paytida yuklanmaydi. Bir marta, o'rnatish bosqichida:
+
+```bash
+python -c "from demucs.pretrained import get_model; get_model('htdemucs_6s')"
+```
+
+`--tags` uchun Essentia modellari `data/audio_models/` ichiga qo'yiladi (kod ularni yuklab olmaydi):
+
+- `discogs-effnet-bs64-1.pb`
+- `genre_discogs400-discogs-effnet-1.pb` va `.json`
+- `mtg_jamendo_instrument-discogs-effnet-1.pb` va `.json`
+- `mtg_jamendo_moodtheme-discogs-effnet-1.pb` va `.json`
+
+**Essentia modellari CC BY-NC-SA 4.0 (tijoriy litsenziya alohida mavjud). Tijoriy foydalanishdan oldin shartlarni tekshiring.**
+
+### Ishga tushirish
+
+```bash
+python audio_lab.py analyze --input track.wav --out output/audio
+python audio_lab.py analyze --input papka --clip 30 90 --stems --tags
+python audio_lab.py profile --dir papka --name uslub
+python audio_lab.py compare --track track.wav --profile output/audio/style_profile_uslub.json
+```
+
+`--stems` va `--tags` default o'chiq. Bir xil fayl va parametrlar qayta hisoblanmaydi; `--refresh` majbur qiladi. Raqamlar 4 o'nli yaxlitlanadi.
+
+### Metrika turlari
+
+| kind | Hisobotdagi belgi | Misollar |
+| --- | --- | --- |
+| measured | [O'LCHANGAN] | LUFS, LRA, true peak, RMS, dinamik diapazon, chastota bandlari, centroid, rolloff, flatness, pauza, stereo |
+| estimate | [TAXMINIY] | past-o'tkazish chegarasi, tempo, tonallik, shovqin pog'onasi, stemlar |
+| proxy | [PROKSI] | onset tezligi, IOI, takrorlanish |
+| probabilistic | [EHTIMOLLIK] | Essentia janr, asbob, kayfiyat teglari |
+
+Har bir sonli metrikada `value`, `unit`, `kind`, `note` bor. `report.md` oxirida **Cheklovlar** bo'limi bor: tempo/tonallik ambientda ishonchsiz, stemlarda artefakt, teglar ehtimollik, tahlil "nega yoqadi"ga javob bermaydi.
+

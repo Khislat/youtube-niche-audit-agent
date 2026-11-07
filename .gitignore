@@ -7,4 +7,9 @@ __pycache__/
 .pytest_cache/
 
 researcher/data/*.db
+researcher/data/audio_inputs/
+researcher/data/audio_models/
 researcher/output/*.csv
+researcher/output/audio/**/*.wav
+researcher/output/audio/*.wav
+researcher/tests/audio_lab/data/*.wav
