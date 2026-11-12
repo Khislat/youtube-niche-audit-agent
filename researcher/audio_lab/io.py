@@ -178,7 +178,8 @@ def measure_ebur128(
     The filter runs inside ffmpeg, so a one-hour file is not loaded as one array.
     """
     ensure_ffmpeg()
-    cmd = [_tool("ffmpeg"), "-v", "info", *_input_args(Path(path), start_s, end_s)]
+    # framelog qatorlari verbose darajada chiqadi (yangi ffmpeg da info yetarli emas).
+    cmd = [_tool("ffmpeg"), "-v", "verbose", *_input_args(Path(path), start_s, end_s)]
     cmd += ["-af", "ebur128=framelog=verbose:peak=true", "-f", "null", "-"]
     proc = subprocess.run(cmd, capture_output=True, check=False)
     text = proc.stderr.decode("utf-8", errors="replace")
@@ -197,16 +198,21 @@ def _parse_ebur128(text: str) -> dict:
     frame_text = text if summary_at < 0 else text[:summary_at]
     summary = text[summary_at:] if summary_at >= 0 else ""
     short_term: list[tuple[float, float]] = []
+    import re
+
+    time_re = re.compile(r"\bt:\s*([\d.]+)")
+    short_re = re.compile(r"\bS:\s*(-?[\d.]+)")
     for line in frame_text.splitlines():
         if " S:" not in line or "t:" not in line:
             continue
-        # t: 1.0 ... S: -20.1 ...
         try:
-            t_token = line.split("t:", 1)[1].split()[0]
-            s_token = line.split("S:", 1)[1].split()[0]
-            t_s = float(t_token)
-            s_lufs = float(s_token)
-        except (IndexError, ValueError):
+            t_m = time_re.search(line)
+            s_m = short_re.search(line)
+            if not t_m or not s_m:
+                continue
+            t_s = float(t_m.group(1))
+            s_lufs = float(s_m.group(1))
+        except ValueError:
             continue
         short_term.append((t_s, s_lufs))
     return {

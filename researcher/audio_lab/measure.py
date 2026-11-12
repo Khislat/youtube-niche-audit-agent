@@ -31,7 +31,7 @@ def analyze_file(
     y = io.load_mono(path, sr=sr, start_s=start_s, end_s=end_s)
     loudness = io.measure_ebur128(path, start_s=start_s, end_s=end_s)
     stereo = _stereo(path, info["channels"], start_s, end_s)
-    measured = _measure(y, sr, info, loudness, stereo)
+    measured = _measure(path, y, sr, info, loudness, stereo, start_s, end_s)
     measured["params"] = {
         "sr": sr,
         "clip_start_s": start_s,
@@ -40,7 +40,16 @@ def analyze_file(
     return _json_ready(measured)
 
 
-def _measure(y: np.ndarray, sr: int, info: dict, loudness: dict, stereo: dict) -> dict:
+def _measure(
+    path: Path,
+    y: np.ndarray,
+    sr: int,
+    info: dict,
+    loudness: dict,
+    stereo: dict,
+    start_s: float | None,
+    end_s: float | None,
+) -> dict:
     duration_s = float(len(y) / sr) if sr else 0.0
     frame_db = _frame_dbfs(y, sr, config.FRAME_S)
     spectrum = _spectrum(y, sr)
@@ -51,6 +60,12 @@ def _measure(y: np.ndarray, sr: int, info: dict, loudness: dict, stereo: dict) -
     bands = _bands(spectrum, sr)
     short_term = _short_term_series(loudness["short_term"], duration_s)
     rms_1s = _rms_timeline(y, sr)
+    noise_floor = _noise_floor_metric(frame_db)
+    spectral = _spectral_metrics(spectrum, sr)
+    spectral["lowpass_cutoff_hz"] = _lowpass_metric(
+        path, spectrum, sr, info, start_s, end_s
+    )
+    dynamic = _dynamic_range_metric(short_term, rms_1s)
     return {
         "duration_s": metric(
             duration_s, "s", "measured", "Tahlil qilingan parcha uzunligi."
@@ -99,14 +114,9 @@ def _measure(y: np.ndarray, sr: int, info: dict, loudness: dict, stereo: dict) -
             "measured",
             "1 soniyalik oynalarning RMS darajasi.",
         ),
-        "dynamic_range_db": metric(
-            _dynamic_range(short_term),
-            "dB",
-            "measured",
-            "Qisqa muddatli balandlikning p95 minus p5.",
-        ),
+        "dynamic_range_db": dynamic,
         "bands": bands,
-        "spectral": _spectral_metrics(spectrum, sr),
+        "spectral": spectral,
         "onsets": _onset_metrics(onset_times, duration_s),
         "pause": _pause_metrics(frame_db),
         "tempo": tempo,
@@ -119,12 +129,7 @@ def _measure(y: np.ndarray, sr: int, info: dict, loudness: dict, stereo: dict) -
             "proxy",
             "O'z-o'ziga o'xshashlik matritsasining kichraytirilgan ko'rinishi (grafik uchun).",
         ),
-        "noise_floor_dbfs": metric(
-            _noise_floor(frame_db),
-            "dBFS",
-            "estimate",
-            "Eng sokin 5% kadrlarning o'rtacha darajasi. Signal ichidagi sokin joyni shovqin deb o'qishi mumkin.",
-        ),
+        "noise_floor_dbfs": noise_floor,
         "artifacts": _artifact_metrics(y, sr, spectrum),
         "timelines_1s": metric(
             _timeline_1s(y, sr, spectrum, onset_times, short_term, rms_1s),
@@ -250,16 +255,10 @@ def _spectral_metrics(spectrum: dict, sr: int) -> dict:
             "measured",
             "Spektr tekisligining kadrlar medianasi. 1 ga yaqin — shovqinga o'xshash.",
         ),
-        "lowpass_cutoff_hz": metric(
-            _lowpass_cutoff(power, spectrum["freqs"]),
-            "Hz",
-            "estimate",
-            "Taxminiy past-o'tkazish chegarasi: silliq spektr cho'qqisidan 60 dB pastga tushgan eng yuqori chastota. Bo'sh binlar o'rtachani yerga tortmasligi uchun tayanch — cho'qqi.",
-        ),
     }
 
 
-def _lowpass_cutoff(power: np.ndarray, freqs: np.ndarray) -> float | None:
+def _lowpass_cutoff(power: np.ndarray, freqs: np.ndarray, sr: int) -> float | None:
     """Highest frequency whose smoothed spectrum stays within 60 dB of the peak.
 
     A median over about 200 Hz ignores single-bin leakage. The reference is the
@@ -284,7 +283,99 @@ def _lowpass_cutoff(power: np.ndarray, freqs: np.ndarray) -> float | None:
     above = usable & (smooth >= reference - config.LOWPASS_DROP_DB)
     if not np.any(above):
         return float(freqs[np.argmax(usable)])
-    return float(freqs[np.max(np.where(above)[0])])
+    cutoff = float(freqs[np.max(np.where(above)[0])])
+    nyquist = sr / 2.0
+    if cutoff >= nyquist - bin_hz:
+        return None
+    return cutoff
+
+
+def _lowpass_metric(
+    path: Path,
+    spectrum: dict,
+    sr: int,
+    info: dict,
+    start_s: float | None,
+    end_s: float | None,
+) -> dict:
+    base = (
+        "Taxminiy past-o'tkazish chegarasi: silliq spektr cho'qqisidan "
+        f"{config.LOWPASS_DROP_DB:.0f} dB pastga tushgan eng yuqori chastota. "
+        "Bo'sh binlar o'rtachani yerga tortmasligi uchun tayanch — cho'qqi."
+    )
+    value = _lowpass_cutoff(spectrum["power"], spectrum["freqs"], sr)
+    sample_in = int(info.get("sample_rate_in") or sr)
+    if value is None and sample_in > sr:
+        sr_hi = min(sample_in, config.SEG_CLARITY_SR)
+        y_hi = io.load_mono(path, sr=sr_hi, start_s=start_s, end_s=end_s)
+        spec_hi = _spectrum(y_hi, sr_hi)
+        value = _lowpass_cutoff(spec_hi["power"], spec_hi["freqs"], sr_hi)
+        if value is not None:
+            base += f" Feature SR {sr} Hz da chegara Nyquistda qoldi; {sr_hi} Hz da qayta hisoblandi."
+    if value is None:
+        note = base + " Aniqlanmadi (tahlil shiftida yoki spektr to'liq bandli)."
+        return metric(None, "Hz", "estimate", note)
+    return metric(value, "Hz", "estimate", base)
+
+
+def _noise_floor_metric(frame_db: np.ndarray) -> dict:
+    threshold = config.NOISE_FLOOR_DIGITAL_SILENCE_DBFS
+    proxy_note = (
+        "Raqamli sukunatsiz kadrlarning eng sokin 5% RMS o'rtachasi: musiqadagi sokin joylar "
+        "darajasi, haqiqiy akustik shovqin pog'onasi emas. "
+        f"artifacts.noise_floor_db (Sokin 10% RMS) alohida: STFT bo'yicha eng past 10% kadrlar, "
+        f"{config.FRAME_S} s RMS; o'lchov [O'LCHANGAN]."
+    )
+    digital = (
+        f"Kadrlar {threshold:.0f} dBFS dan past raqamli sukunat hisobdan chiqariladi."
+    )
+    if frame_db.size == 0:
+        return metric(
+            None,
+            "dBFS",
+            "proxy",
+            proxy_note + " " + digital + " Raqamli sukunat, shovqin o'lchab bo'lmadi.",
+        )
+    usable = frame_db[np.isfinite(frame_db) & (frame_db > threshold)]
+    if usable.size == 0:
+        return metric(
+            None,
+            "dBFS",
+            "proxy",
+            proxy_note + " " + digital + " Raqamli sukunat, shovqin o'lchab bo'lmadi.",
+        )
+    count = max(1, int(math.ceil(usable.size * config.NOISE_FLOOR_QUIET_FRACTION)))
+    quiet = np.partition(usable, count - 1)[:count]
+    value = float(np.mean(quiet))
+    if value <= threshold:
+        return metric(
+            None,
+            "dBFS",
+            "proxy",
+            proxy_note + " " + digital + " Raqamli sukunat, shovqin o'lchab bo'lmadi.",
+        )
+    return metric(value, "dBFS", "proxy", proxy_note + " " + digital)
+
+
+def _dynamic_range_metric(short_term: list[dict], rms_1s: list[dict]) -> dict:
+    base = "Qisqa muddatli balandlikning p95 minus p5."
+    lufs_range = _dynamic_range(short_term)
+    if lufs_range is not None:
+        return metric(lufs_range, "dB", "measured", base + " ffmpeg ebur128 S maydoni.")
+    rms_range = _dynamic_range_rms_dbfs(rms_1s)
+    if rms_range is not None:
+        return metric(
+            rms_range,
+            "dB",
+            "measured",
+            base + " ffmpeg short-term LUFS mavjud emas; 1 s RMS dBFS p95−p5 zaxira.",
+        )
+    return metric(
+        None,
+        "dB",
+        "measured",
+        base + " ffmpeg short-term LUFS va RMS qatorlari yetarli emas.",
+    )
 
 
 def _onset_times(y: np.ndarray, sr: int) -> np.ndarray:
@@ -534,7 +625,15 @@ def _repetition(y: np.ndarray, sr: int) -> dict:
         lag_mean.append(float(np.mean(np.diag(similarity, k=lag))))
     lag_s_arr = np.asarray(lag_s)
     lag_mean_arr = np.asarray(lag_mean)
-    far = lag_s_arr >= config.REP_MIN_LAG_S
+    max_lag_s = duration_s / 2.0
+    far = (lag_s_arr >= config.REP_MIN_LAG_S) & (lag_s_arr <= max_lag_s)
+    lag_note = note
+    if max_lag_s < config.REP_MIN_LAG_S:
+        return {
+            "repetition_score": metric(None, "0-1", "proxy", note + " Parcha juda qisqa."),
+            "top_lag_s": metric(None, "s", "proxy", note + " Parcha juda qisqa."),
+            "_ssm": [],
+        }
     if not np.any(far):
         score = None
         top = None
@@ -545,11 +644,27 @@ def _repetition(y: np.ndarray, sr: int) -> dict:
         # is the shortest lag that reaches that peak, not the first numeric max.
         tied = far & (lag_mean_arr >= best - 0.02)
         top = float(lag_s_arr[int(np.argmax(tied))])
+        min_far_lag = float(np.min(lag_s_arr[far]))
+        if top is not None and abs(top - min_far_lag) < 1e-6:
+            lag_note += (
+                f" Qiymat qidiruvning eng qisqa lag'iga ({min_far_lag:.1f} s, "
+                f"config.REP_MIN_LAG_S={config.REP_MIN_LAG_S} s va REP_HOP_S dan) teng; "
+                "takror davri ma'lum emas."
+            )
+            top = None
+    if top is not None and top > max_lag_s:
+        lag_note += f" Lag trek davomiyligining yarmidan ({max_lag_s:.1f} s) oshdi; larni bu bilan chekladik."
+        top = None
     step = max(1, math.ceil(similarity.shape[0] / 200))
     preview = similarity[::step, ::step]
     return {
         "repetition_score": metric(score, "0-1", "proxy", note),
-        "top_lag_s": metric(top, "s", "proxy", "Eng yuqori o'xshashlikdagi lag (oyna uzunligidan uzoq)."),
+        "top_lag_s": metric(
+            top,
+            "s",
+            "proxy",
+            lag_note + " Eng yuqori o'xshashlikdagi lag (oyna uzunligidan uzoq, ≤ davomiylik/2).",
+        ),
         "_ssm": preview.tolist(),
     }
 
@@ -750,14 +865,6 @@ def _flux_stats(magnitude: np.ndarray) -> tuple[float | None, float | None]:
     return float(np.mean(flux)), float(np.std(flux))
 
 
-def _noise_floor(frame_db: np.ndarray) -> float | None:
-    if frame_db.size == 0:
-        return None
-    count = max(1, int(math.ceil(frame_db.size * config.NOISE_FLOOR_QUIET_FRACTION)))
-    quiet = np.partition(frame_db, count - 1)[:count]
-    return float(np.mean(quiet))
-
-
 def _short_term_series(samples: list[tuple[float, float]], duration_s: float) -> list[dict]:
     if not samples or duration_s <= 0:
         return []
@@ -774,6 +881,14 @@ def _short_term_series(samples: list[tuple[float, float]], duration_s: float) ->
 
 def _dynamic_range(short_term: list[dict]) -> float | None:
     values = [row["lufs"] for row in short_term if row.get("lufs") is not None]
+    if len(values) < 2:
+        return None
+    arr = np.asarray(values, dtype=np.float64)
+    return float(np.percentile(arr, 95) - np.percentile(arr, 5))
+
+
+def _dynamic_range_rms_dbfs(rms_1s: list[dict]) -> float | None:
+    values = [row["dbfs"] for row in rms_1s if row.get("dbfs") is not None]
     if len(values) < 2:
         return None
     arr = np.asarray(values, dtype=np.float64)
@@ -853,6 +968,8 @@ def _json_ready(value):
         number = float(value)
         if not math.isfinite(number):
             return None
+        if 0 < abs(number) < 1e-3:
+            return round(number, 8)
         return round(number, 4)
     if isinstance(value, dict):
         return {str(key): _json_ready(item) for key, item in value.items()}

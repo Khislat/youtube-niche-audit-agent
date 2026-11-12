@@ -20,6 +20,8 @@ HOP_LENGTH = 1024
 FRAME_S = 0.05
 PAUSE_DBFS = -50.0
 NOISE_FLOOR_QUIET_FRACTION = 0.05
+# Kadrlar shu darajadan past bo'lsa raqamli sukunat; shovqin pog'onasi hisobiga kirmaydi.
+NOISE_FLOOR_DIGITAL_SILENCE_DBFS = -100.0
 # Separate from the 5% noise-floor estimate. Quietest fraction for artifact measures.
 ARTIFACT_QUIET_FRACTION = 0.10
 ARTIFACT_FLATNESS_LOW_HZ = 2000.0

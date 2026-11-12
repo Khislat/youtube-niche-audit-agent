@@ -63,7 +63,7 @@ ROWS = (
     ("repetition.top_lag_s", "Takrorlanish lagi"),
     ("stereo.width", "Stereo kenglik"),
     ("stereo.channel_correlation", "Kanallar korrelyatsiyasi"),
-    ("noise_floor_dbfs", "Shovqin pog'onasi"),
+    ("noise_floor_dbfs", "Sokin joylar (5% RMS, proksi)"),
     ("artifacts.noise_floor_db", "Sokin 10% RMS"),
     ("artifacts.flatness_2_8khz", "Tekislik 2–8 kHz"),
     ("artifacts.hpss_harmonic_share", "HPSS garmonik ulush"),
@@ -711,20 +711,34 @@ def _plot_stems(path: Path, stem_result: dict) -> None:
     plt.close(fig)
 
 
+def _format_metric_display(value, path: str, unit: str) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, (int, float)) and "flatness" in path and 0 < abs(value) < 0.01:
+        return f"{float(value):.4e} {unit}".strip()
+    return f"{value} {unit}".strip()
+
+
 def _markdown(payload: dict) -> str:
     metrics = payload["metrics"]
+    tempo_reliable = metrics.get("tempo", {}).get("reliable")
     lines = [f"# Audio tahlil: {payload['file_name']}", "", "| Metrika | Qiymat | Belgi |", "| --- | --- | --- |"]
     for path, label in ROWS:
+        if path in ("tempo.bpm", "tempo.confidence") and tempo_reliable is False:
+            continue
         item = _lookup(metrics, path)
         if not item:
             continue
         value = item.get("value")
         unit = item.get("unit") or ""
         badge = BADGE.get(item.get("kind"), "")
-        shown = "—" if value is None else f"{value} {unit}".strip()
+        if path == "tempo.bpm" and tempo_reliable is False:
+            shown = "ishonchsiz"
+        else:
+            shown = _format_metric_display(value, path, unit)
         lines.append(f"| {label} | {shown} | {badge} |")
-    if payload["metrics"].get("tempo", {}).get("reliable") is False:
-        lines.append("| Tempo ishonchli | yo'q | [TAXMINIY] |")
+    if tempo_reliable is False:
+        lines.append("| Tempo | ishonchsiz | [TAXMINIY] |")
     stem_result = payload.get("stems") or {}
     if stem_result.get("status") == "ok":
         for name, stem in sorted((stem_result.get("stems") or {}).items()):
