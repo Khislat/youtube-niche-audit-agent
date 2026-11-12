@@ -742,7 +742,11 @@ def _markdown(payload: dict) -> str:
             prob = top[0]["probability"]["value"]
             lines.append(f"| Teg {head} | {label} {prob} | [EHTIMOLLIK] |")
     else:
-        lines.append(f"| Teglar | {tag_result.get('status', 'off')} | [EHTIMOLLIK] |")
+        status = tag_result.get("status", "off")
+        reason = tag_result.get("reason")
+        if status == "skipped" and reason:
+            status = f"skipped ({reason})"
+        lines.append(f"| Teglar | {status} | [EHTIMOLLIK] |")
     lines.append("")
     if payload.get("segments"):
         lines.extend(_track_lines(payload["segments"]))

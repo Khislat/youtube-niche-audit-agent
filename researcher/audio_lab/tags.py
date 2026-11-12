@@ -54,6 +54,34 @@ def _skipped(reason: str) -> dict:
     return {"status": "skipped", "reason": reason, "license": LICENSE}
 
 
+def _tensor_names(meta_path: Path) -> tuple[str, str]:
+    """Input/output node names from the Essentia model JSON (schema.inputs/outputs.name)."""
+    import json
+
+    payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    schema = payload.get("schema")
+    if not schema:
+        raise io.AudioLabError(f"Teg modeli JSON da schema yo'q: {meta_path.name}")
+    inputs = schema.get("inputs") or []
+    outputs = schema.get("outputs") or []
+    if not inputs or not outputs:
+        raise io.AudioLabError(f"Teg modeli JSON da schema to'liq emas: {meta_path.name}")
+    input_name = inputs[0]["name"]
+    output_name = None
+    for item in outputs:
+        if item.get("output_purpose") == "predictions":
+            output_name = item["name"]
+            break
+    if output_name is None:
+        for item in outputs:
+            if item.get("op") == "Sigmoid":
+                output_name = item["name"]
+                break
+    if output_name is None:
+        output_name = outputs[0]["name"]
+    return input_name, output_name
+
+
 def _label(path: Path, clip: tuple[float, float] | None, model_dir: Path) -> dict:
     import json
     from essentia.standard import TensorflowPredict2D, TensorflowPredictEffnetDiscogs
@@ -66,12 +94,14 @@ def _label(path: Path, clip: tuple[float, float] | None, model_dir: Path) -> dic
     )
     heads = []
     for name, graph, meta in HEADS:
-        payload = json.loads((model_dir / meta).read_text(encoding="utf-8"))
+        meta_path = model_dir / meta
+        payload = json.loads(meta_path.read_text(encoding="utf-8"))
         classes = payload.get("classes") or payload.get("labels") or []
+        input_name, output_name = _tensor_names(meta_path)
         predictor = TensorflowPredict2D(
             graphFilename=str(model_dir / graph),
-            input="serving_default_model_Placeholder",
-            output="PartitionedCall:0",
+            input=input_name,
+            output=output_name,
         )
         heads.append((name, classes, predictor))
     chunk = int(CHUNK_S * TAG_SR)
